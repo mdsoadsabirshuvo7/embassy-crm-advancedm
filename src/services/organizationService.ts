@@ -71,4 +71,10 @@ export class OrganizationService {
   }): Promise<void> {
     await this.updateOrganization(orgId, settings);
   }
+
+  // List all organizations (restricted to SUPER_ADMIN usage at call site)
+  static async listOrganizations(): Promise<Organization[]> {
+    const snapshot = await getDocs(collection(db, 'organizations'));
+    return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...(docSnap.data() as Omit<Organization, 'id'>) }));
+  }
 }

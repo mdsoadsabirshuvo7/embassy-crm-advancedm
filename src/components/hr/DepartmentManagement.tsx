@@ -12,8 +12,13 @@ import { Plus, Edit, Users, DollarSign, Building2 } from 'lucide-react';
 import { Department } from '@/types/database';
 import { ExportDropdown } from '@/components/export/ExportDropdown';
 
+interface SimpleEmployeeRef {
+  id: string;
+  name: string;
+}
+
 interface DepartmentManagementProps {
-  employees: any[];
+  employees: SimpleEmployeeRef[];
 }
 
 export const DepartmentManagement: React.FC<DepartmentManagementProps> = ({ employees }) => {

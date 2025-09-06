@@ -1,4 +1,6 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+// NOTE: Gradual migration to React Query in progress (expenses first slice)
 import { LocalStorageService } from '../services/localStorageService';
 import { Client, Invoice, Task, Employee, Document, Account, Transaction } from '../types/database';
 import { Expense } from '../types/expense';
@@ -6,6 +8,18 @@ import { dataSyncManager } from '../utils/dataSync';
 import { auditLogger } from '../utils/auditLogger';
 import { useAuth } from './AuthContext';
 import { toast } from '@/hooks/use-toast';
+
+interface ExportBundle {
+  clients: Client[];
+  invoices: Invoice[];
+  tasks: Task[];
+  employees: Employee[];
+  documents: Document[];
+  expenses: Expense[];
+  accounts: Account[];
+  transactions: Transaction[];
+  exportedAt: string;
+}
 
 interface DataContextType {
   // Client data
@@ -55,8 +69,8 @@ interface DataContextType {
   
   // Utility functions
   refreshData: () => void;
-  exportData: () => any;
-  importData: (data: any) => void;
+  exportData: () => ExportBundle;
+  importData: (data: ExportBundle) => void;
   clearAllData: () => void;
 }
 
@@ -380,34 +394,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateExpense = async (id: string, updates: Partial<Expense>) => {
+    const prev = expenses;
+    const target = expenses.find(e => e.id === id);
+    // Optimistic UI
+    if (target) {
+      setExpenses(prevExp => prevExp.map(e => e.id === id ? { ...e, ...updates } : e));
+    }
     try {
-      const oldExpense = expenses.find(e => e.id === id);
       LocalStorageService.updateExpense(id, updates);
-      
-      // Log the update
-      if (user && oldExpense) {
+      if (user && target) {
         await auditLogger.logUpdate(
           user.id,
           user.name,
           'expenses',
           id,
-          oldExpense,
-          { ...oldExpense, ...updates }
+          target,
+          { ...target, ...updates }
         );
       }
-      
       refreshData();
-      toast({
-        title: "Success",
-        description: "Expense updated successfully",
-      });
+      toast({ title: "Success", description: "Expense updated" });
     } catch (error) {
       console.error('Error updating expense:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update expense",
-        variant: "destructive",
-      });
+      setExpenses(prev); // rollback
+      toast({ title: "Error", description: "Failed to update expense", variant: "destructive" });
     }
   };
 
@@ -496,11 +506,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Utility methods
-  const exportData = () => {
+
+  const exportData = (): ExportBundle => {
     return LocalStorageService.exportAllData();
   };
 
-  const importData = (data: any) => {
+  const importData = (data: ExportBundle) => {
     try {
       LocalStorageService.importData(data);
       refreshData();

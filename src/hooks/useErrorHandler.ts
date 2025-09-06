@@ -64,7 +64,7 @@ export const useErrorHandler = (options: ErrorHandlerOptions = {}) => {
     }
   }, [handleError]);
 
-  const wrapWithErrorHandling = useCallback(<T extends (...args: any[]) => any>(
+  const wrapWithErrorHandling = useCallback(<T extends (...args: unknown[]) => unknown>(
     fn: T,
     context?: string
   ): T => {

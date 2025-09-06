@@ -16,6 +16,7 @@ import {
   Settings
 } from 'lucide-react';
 import { useModules } from '../../contexts/ModuleContext';
+import type { ModuleConfig } from '../../contexts/ModuleContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useI18n } from '../../contexts/I18nContext';
 
@@ -42,7 +43,8 @@ const ModuleManagement: React.FC = () => {
     return requiredRoles.includes(user.role);
   };
 
-  const renderModuleCard = (module: any) => {
+  // Reuse existing ModuleConfig type from context instead of redefining a UI copy
+  const renderModuleCard = (module: ModuleConfig) => {
     const IconComponent = iconMap[module.icon as keyof typeof iconMap] || Settings;
     const canToggle = hasPermission(module.requiredRole);
     

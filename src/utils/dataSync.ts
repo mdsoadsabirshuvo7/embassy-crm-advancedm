@@ -107,11 +107,12 @@ class DataSyncManager {
       
       // Log the action
       if (userId && userName) {
+        const recordId = (data as unknown as { id?: string }).id || 'unknown';
         await auditLogger.logCreate(
           userId,
           userName,
           storeName,
-          (data as any).id || 'unknown',
+          recordId,
           data
         );
       }

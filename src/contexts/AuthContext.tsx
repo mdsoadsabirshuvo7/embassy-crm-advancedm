@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { AuthService } from '../services/authService';
@@ -101,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const orgData = await OrganizationService.getOrganization(userData.orgId);
         setOrganization(orgData);
       }
-    } catch (error: any) {
+  } catch (error: unknown) {
       setIsLoading(false);
       throw error;
     }

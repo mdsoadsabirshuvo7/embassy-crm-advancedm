@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -20,8 +20,9 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { MockDataService } from '@/services/mockDataService';
 import { formatCurrency } from '@/lib/utils';
-import { AnalyticsChart } from '@/components/dashboard/AnalyticsChart';
-import { DocumentExpiryTracker } from '@/components/dashboard/DocumentExpiryTracker';
+// Lazy load heavy dashboard widgets
+const AnalyticsChart = lazy(() => import('@/components/dashboard/AnalyticsChart').then(m => ({ default: m.AnalyticsChart })));
+const DocumentExpiryTracker = lazy(() => import('@/components/dashboard/DocumentExpiryTracker').then(m => ({ default: m.DocumentExpiryTracker })));
 
 const StatCard: React.FC<{
   title: string;
@@ -87,7 +88,14 @@ const RecentActivity: React.FC = () => {
 
 export const Dashboard: React.FC = () => {
   const { user, organization } = useAuth();
-  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  interface DashboardStats {
+    clients: { total: number; active: number; pending: number; growth: string };
+    revenue: { total: number; monthly: number; growth: string };
+    invoices: { total: number; paid: number; pending: number; overdue: number };
+    tasks: { total: number; active: number; overdue: number; completed: number };
+    employees: { total: number; onLeave: number };
+  }
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -116,10 +124,10 @@ export const Dashboard: React.FC = () => {
   }
 
   const stats = dashboardStats ? [
-    { title: 'Total Clients', value: dashboardStats.clients.total.toString(), change: dashboardStats.clients.growth, icon: Users },
+    { title: 'Total Clients', value: String(dashboardStats.clients.total), change: dashboardStats.clients.growth, icon: Users },
     { title: 'Monthly Revenue', value: formatCurrency(dashboardStats.revenue.monthly), change: dashboardStats.revenue.growth, icon: DollarSign },
-    { title: 'Active Tasks', value: dashboardStats.tasks.active.toString(), change: `${dashboardStats.tasks.overdue} overdue`, icon: FileText, positive: dashboardStats.tasks.overdue === 0 },
-    { title: 'Team Members', value: dashboardStats.employees.total.toString(), change: `${dashboardStats.employees.onLeave} on leave`, icon: Users },
+    { title: 'Active Tasks', value: String(dashboardStats.tasks.active), change: `${dashboardStats.tasks.overdue} overdue`, icon: FileText, positive: dashboardStats.tasks.overdue === 0 },
+    { title: 'Team Members', value: String(dashboardStats.employees.total), change: `${dashboardStats.employees.onLeave} on leave`, icon: Users },
   ] : [];
 
   const projectProgress = [
@@ -223,52 +231,65 @@ export const Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
             </div>
-            
-            <RecentActivity />
+            <Suspense fallback={<Card className="p-4">Loading activity...</Card>}>
+              <RecentActivity />
+            </Suspense>
           </div>
         </TabsContent>
 
         <TabsContent value="analytics" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <AnalyticsChart
+            <Suspense fallback={<Card className="p-6">Loading revenue trends...</Card>}>
+              <AnalyticsChart
               type="revenue"
               title="Revenue Trends"
               description="Monthly revenue growth over time"
               data={revenueData}
               timeRange="7 months"
             />
-            <AnalyticsChart
+            </Suspense>
+            <Suspense fallback={<Card className="p-6">Loading client distribution...</Card>}>
+              <AnalyticsChart
               type="clients"
               title="Client Distribution"
               description="Client status breakdown by month"
               data={clientsData}
               timeRange="7 months"
             />
+            </Suspense>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <AnalyticsChart
+            <Suspense fallback={<Card className="p-6">Loading task status...</Card>}>
+              <AnalyticsChart
               type="tasks"
               title="Task Status"
               description="Current task distribution"
               data={tasksData}
               timeRange="Current"
             />
-            <AnalyticsChart
+            </Suspense>
+            <Suspense fallback={<Card className="p-6">Loading document processing...</Card>}>
+              <AnalyticsChart
               type="documents"
               title="Document Processing"
               description="Documents processed over time"
               data={documentsData}
               timeRange="7 months"
             />
+            </Suspense>
           </div>
         </TabsContent>
 
         <TabsContent value="documents" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
-              <DocumentExpiryTracker />
+              <Suspense fallback={<Card className="p-6">Loading expiry tracker...</Card>}>
+                <DocumentExpiryTracker />
+              </Suspense>
             </div>
-            <RecentActivity />
+            <Suspense fallback={<Card className="p-4">Loading activity...</Card>}>
+              <RecentActivity />
+            </Suspense>
           </div>
         </TabsContent>
       </Tabs>

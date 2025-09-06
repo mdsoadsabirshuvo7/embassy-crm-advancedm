@@ -53,9 +53,9 @@ Transform your operations with measurable improvements:
 
 ### Multi-Organization Architecture (Super Admin Scoped)
 - **Super Admin org switching** → Organization selector visible only to `SUPER_ADMIN`
-- **Scoped local data** → Local storage collections automatically inject & filter `orgId`
+- **Scoped local data** → All local storage collections automatically inject & filter `orgId`
 - **Per-org module configuration** → Module enablement persisted per organization key
-- **Isolation guard** → Non-super-admin users operate only in their assigned org
+- **Isolation guard** → Non-super-admin users operate strictly within their assigned org (no UI to switch)
 
 ### Advanced Security & Compliance
 - **Role-based access control** → Granular permissions for data protection
@@ -103,30 +103,33 @@ Transform your operations with measurable improvements:
 ## 🛠️ Technology Stack
 
 **Frontend Architecture**
-- React 18 + TypeScript (strict)
-- Tailwind CSS + shadcn/ui primitives
-- TanStack React Query (incremental adoption)
-- React Router v6 + lazy route code-splitting
-- Dynamic library imports (pdf/excel/word) via unified export service
+- React 18 + TypeScript (strict typing emphasis)
+- Tailwind CSS + shadcn/ui component primitives
+- TanStack React Query (incremental migration – Expenses & Tasks slices complete)
+- React Router v6 (lazy-loaded route code-splitting)
+- Dynamic import of heavy libs (jsPDF / xlsx) via a unified `ExportService`
+- Local offline storage abstraction (versioned schema + migrations)
+- Module-based feature gating + fine-grained policy map (`utils/permissions.ts`)
 
 **Data & Persistence**
-- LocalStorage (schema versioned) + offline audit log
-- Firestore integration (auth ready)
-- Audit logging with export viewer (CSV / Excel / PDF)
-- Per-tenant namespacing + migrations
+- LocalStorage (schema versioned) + offline audit log storage
+- Firestore / Firebase Auth (integration ready; currently local-first mode)
+- Audit logging (`auditLogger`) with exportable viewer (CSV / Excel / PDF)
+- Per-tenant namespacing + migration for legacy records
 
 **Performance & UX**
-- Route prefetch on sidebar hover
-- Optimistic updates (Expenses / Tasks)
-- Column chooser persistence (Expenses)
-- Optional service worker shell cache
-- Currency conversion service
-- Selector memoization keyed by org
+- Route bundle prefetch on sidebar hover (instant feel after first nav)
+- Optimistic updates (Expenses & Tasks) with rollback on error
+- Column chooser with persisted table preferences (Expenses)
+- Optional service worker shell & asset caching (`public/service-worker.js`)
+- Currency conversion / formatting service (USD ↔ BDT)
+- Selector memoization keyed by orgId (employee/client maps) to reduce recompute
 
 **Quality & Tooling**
-- Vitest + React Testing Library
-- Architecture & contributing guides
-- Per-feature Error Boundaries
+- Vitest + React Testing Library (initial smoke tests scaffolded)
+- Architecture & contributor guides (`ARCHITECTURE.md`, `CONTRIBUTING.md`)
+- Contrast audit utility (`utils/contrastAudit.ts`) to evaluate palette ratios
+- Per-feature Error Boundaries (isolated failure domains)
 
 ## 📊 Feature Comparison
 
@@ -149,6 +152,263 @@ cd embassy-crm
 npm install
 npm run dev
 ```
+
+4. **Run tests**
+   ```bash
+   npm test
+   ```
+
+5. **Build production bundle**
+   ```bash
+   npm run build
+   ```
+
+6. **Preview production build**
+   ```bash
+   npm run preview
+   ```
+
+### Available NPM Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `dev` | Start Vite dev server |
+| `build` | Production build |
+| `build:dev` | Unminified dev-mode build (profiling) |
+| `preview` | Serve built assets |
+| `lint` | Run ESLint across codebase |
+| `test` | Run Vitest suite (CI mode) |
+| `test:ui` | Interactive Vitest watch mode |
+
+---
+
+## 🧩 Modular Feature System
+
+Embassy CRM uses a dual-layer authorization approach (with tenant scoping):
+
+1. **Module Gating** – High-level enable/disable toggles stored in `ModuleContext` (persisted per-org in `localStorage`).
+2. **Action Policy Map** – Fine-grained action → roles mapping in `utils/permissions.ts` (e.g. `expenses:approve`).
+
+If a module is disabled, authorized administrators see a quick inline "Quick Enable" option on the Access Denied screen.
+
+### Adding a New Module
+1. Add entry to `ModuleContext.defaultModules`.
+2. Create route + lazy import.
+3. Gate with `<ProtectedRoute module="yourModule" ...>`.
+4. (Optional) Add action-level permissions to `POLICY` map.
+5. Ensure create/update paths auto-inject `orgId` (service layer already enforces this for bundled modules).
+
+---
+
+## 🔍 Audit Logging
+
+All critical mutations can be recorded via `auditLogger` (login/logout, CRUD, exports, permission changes). The viewer component:
+- Filters by action & free-text search
+- Exports to CSV / Excel / PDF through the unified export layer
+- Supports future compliance reporting (structure already scaffolded)
+- Filters by active organization (Super Admin can pivot across orgs)
+
+To log a custom action:
+```ts
+import { auditLogger } from '@/utils/auditLogger';
+await auditLogger.log(user.id, user.name, 'CUSTOM_ACTION', 'resource', resourceId, oldData, newData);
+```
+
+---
+
+## ⚡ Performance Optimizations
+
+| Optimization | Description |
+|--------------|-------------|
+| Dynamic Imports | Heavy libraries (pdf/excel) only loaded on demand |
+| Route Prefetch | Hovering a sidebar link warms the route chunk |
+| Optimistic Updates | Immediate UI response for expense/task edits with rollback |
+| Column Persistence | Avoids reflow & user reconfiguration cost per visit |
+| Service Worker (opt) | Shell & static asset caching for faster revisits |
+| React Query Cache | Minimizes redundant localStorage reads |
+
+---
+
+## 💱 Currency & Formatting
+
+Central helpers in `currencyService.ts` manage conversion & formatting. Example:
+```ts
+import { convert, formatMoney } from '@/services/currencyService';
+const bdt = convert(100, 'USD', 'BDT');
+const formatted = formatMoney(bdt, 'BDT');
+```
+
+---
+
+## 🧪 Testing
+
+Initial foundation is present (Vitest + RTL). Add tests beside components or under `src/__tests__`.
+
+Example smoke test (`AuditLogViewer`):
+```ts
+import { render, screen } from '@testing-library/react';
+import AuditLogViewer from '@/components/audit/AuditLogViewer';
+test('renders audit log heading', () => {
+  render(<AuditLogViewer />);
+  expect(screen.getByText(/Audit Logs/i)).toBeInTheDocument();
+});
+```
+
+---
+
+## ♿ Accessibility & Contrast
+
+Use `auditPalette` from `utils/contrastAudit.ts` in the browser console:
+```js
+import { auditPalette } from '/src/utils/contrastAudit.ts';
+auditPalette([
+  ['#ffffff','#0f1115'],
+  ['#ffffff','#1e293b']
+]);
+```
+Returns contrast ratios to verify WCAG thresholds.
+
+---
+
+## 🧱 Architecture & Contribution
+
+Detailed technical structure: see `ARCHITECTURE.md`.
+Guidelines & workflow: see `CONTRIBUTING.md`.
+
+---
+
+## 🧭 Roadmap (Implemented vs Planned Snapshot)
+
+| Area | Status |
+|------|--------|
+| Schema Versioned Local Storage | ✅ Implemented |
+| Expenses React Query + Optimistic | ✅ Implemented |
+| Tasks React Query + Optimistic | ✅ Implemented |
+| Audit Log Viewer + Export | ✅ Implemented |
+| Column Chooser (Expenses) | ✅ Implemented |
+| Permission Policy Map | ✅ Implemented |
+| Quick Module Toggle in AccessDenied | ✅ Implemented |
+| Route Prefetch on Hover | ✅ Implemented |
+| Service Worker Shell Cache | ✅ Optional Prototype |
+| Per-Org Module Config | ✅ Implemented |
+| Invitation Management (basic UI) | ✅ Implemented |
+| Org Switch Restricted to Super Admin | ✅ Implemented |
+| Compliance Report Export | 🟡 Planned |
+| Client Portal | 🟡 Planned |
+| AI Workflow Suggestions | 🟡 Planned |
+
+---
+
+## 🔐 Production Hardening (Next Steps)
+
+| Item | Rationale |
+|------|-----------|
+| Server-side audit log persistence | Tamper resistance |
+| Role & permission editor UI | Dynamic policy management |
+| Comprehensive test coverage | Regression prevention |
+| Full PWA manifest & offline flows | Better mobile UX |
+| External rate provider for FX | Accurate currency conversion |
+
+---
+
+## 🏦 Advanced / Premium Feature Set (Status-Aligned)
+
+Legend: ✅ Released | 🚧 In-Progress (scaffold + partial logic) | 🧪 Experimental | 🗺️ Planned
+
+This section mirrors the internal `FeatureRegistry` flags. Many domains now have lightweight TypeScript service scaffolds so UI wiring can proceed incrementally without blocking the base platform.
+
+### 🏦 Advanced Accounting
+| Capability | Status | Notes |
+|------------|--------|-------|
+| General Ledger & Journals | 🚧 | `ledgerTypes.ts`, `ledgerService.ts` scaffolds |
+| Trial Balance Generation | 🚧 | Basic aggregation implemented |
+| Multi-Entity Consolidation | 🗺️ | Depends on per-org financial roll-up |
+| Automated Tax Profiles (VAT / GST / Corporate) | 🚧 | `TaxRule` model stub present |
+| Bank Reconciliation (CSV/OFX import + auto-match) | 🚧 | `reconciliationService.ts` naive matcher |
+| Budgeting & Forecasting (12/24 mo) | 🗺️ | BudgetLine model only |
+| Cash Flow Statements | 🗺️ | Derive from journal + classification |
+| Regulatory Exports (SAF-T / XBRL) | 🗺️ | Adapter pattern planned |
+
+### 📊 Analytics & BI
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Dashboard Builder (widgets + layouts) | 🚧 | `dashboardService.ts` scaffold |
+| Predictive Analytics (case timelines) | 🚧 | `predictiveService.ts` heuristic model |
+| Drilldown Reporting Path | 🚧 | `drilldownService.ts` hierarchy scaffold |
+| Regulatory Reporting Packs | 🗺️ | Template-driven export pending |
+| Embedded Query Layer (DuckDB/WASM) | 🗺️ | Future optional bundle |
+
+### 📄 Document Management
+| Capability | Status | Notes |
+|------------|--------|-------|
+| OCR & Smart Forms | 🚧 | `ocrService.ts` stub extraction |
+| Document Versioning Graph | 🚧 | `versioningService.ts` basic version chain |
+| Native E-Signatures | 🚧 | `esignService.ts` request lifecycle |
+| Template Marketplace | 🚧 | `templateService.ts` seeded system templates |
+| AI Document Validation | 🗺️ | Will depend on OCR confidence matrix |
+
+### 🧑‍🤝‍🧑 HR & Workforce
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Payroll Engine (components + payslips) | 🚧 | `payrollService.ts` baseline calc |
+| Attendance & Leave (geo/IP) | 🚧 | `attendanceService.ts` check-in + leave flow |
+| Recruitment Pipeline | 🚧 | `recruitmentService.ts` stage transitions |
+| Performance & OKRs | 🚧 | `performanceService.ts` objectives & KRs |
+| Workforce Analytics | 🗺️ | Needs data aggregation layer |
+
+### 🌐 Communication Hub
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Internal Chat Threads | 🚧 | `chatService.ts` in-memory store |
+| Client Portal Messaging | 🗺️ | Depends on external user identity layer |
+| Video Calls (WebRTC) | 🗺️ | Feature flag present (no impl) |
+| Notification System | 🚧 | `notificationService.ts` scaffold |
+
+### 🤖 AI & Automation
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Natural Language Assistant | 🚧 | `assistantService.ts` stub responder |
+| Workflow Optimizer | 🗺️ | Requires event telemetry streams |
+| Case Outcome Predictor | 🗺️ | Builds on predictive analytics data corpus |
+| Fraud / Anomaly Detection | 🚧 | `fraudService.ts` placeholder analyzer |
+| Autonomous Macros | 🗺️ | Queue/automation framework not yet added |
+
+### 🛡️ Security & Compliance
+| Capability | Status | Notes |
+|------------|--------|-------|
+| Compliance Rule Engine | 🚧 | `complianceEngine.ts` basic rule list/eval |
+| Zero-Trust Device Layer | 🗺️ | Device fingerprint + step-up auth pending |
+| Data Residency Partitioning | 🗺️ | Region-aware persistence strategy |
+| On-Prem Deployment Profile | 🗺️ | Build target flag only (planning) |
+| Field-Level Encryption Hooks | 🗺️ | Crypto key management layer TBD |
+
+### 🔌 Extensibility Model
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Feature Flag Registry | ✅ | `FeatureRegistry.ts` enumerates capabilities |
+| Pluggable Service Scaffolds | 🚧 | Multiple domain service files added |
+| Background Job Abstraction | 🗺️ | Awaiting server / worker design |
+| Manifest-Based Mounting | 🗺️ | To be introduced with first UI module rollout |
+
+Next Implementation Priorities (suggested):
+1. Surface selected scaffolded services via minimal UI panels (read-only lists) to validate data shapes.
+2. Introduce persistence adapter interface (local memory → localStorage → Firestore).
+3. Add feature flag override storage (per-org + super admin global defaults).
+4. Begin end-to-end slice: Accounting journal UI (create entry → trial balance view → reconciliation match).
+5. Add test harness per domain (ledger balancing, OCR field extraction shape, payroll net calc).
+
+---
+
+## ✅ Quick Start (TL;DR)
+```bash
+git clone <YOUR_GIT_URL>
+cd embassy-crm
+npm install
+npm run dev # open http://localhost:8080
+npm test     # run smoke tests
+```
+
+---
 
 ### Deployment Options
 

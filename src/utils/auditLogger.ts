@@ -7,12 +7,13 @@ export interface AuditLog {
   action: string;
   resource: string;
   resourceId?: string;
-  oldData?: any;
-  newData?: any;
+  oldData?: unknown;
+  newData?: unknown;
   ipAddress?: string;
   userAgent?: string;
   timestamp: number;
   sessionId?: string;
+  orgId?: string; // tenant scope
 }
 
 class AuditLogger {
@@ -35,15 +36,17 @@ class AuditLogger {
     }
   }
 
-  async log(
+  async log<TOld = unknown, TNew = unknown>(
     userId: string,
     userName: string,
     action: string,
     resource: string,
     resourceId?: string,
-    oldData?: any,
-    newData?: any
+    oldData?: TOld,
+    newData?: TNew
   ): Promise<void> {
+    // Attempt to derive orgId from localStorage (set by TenantContext)
+    const activeOrgId = localStorage.getItem('activeOrgId') || undefined;
     const auditEntry: AuditLog = {
       userId,
       userName,
@@ -55,7 +58,8 @@ class AuditLogger {
       ipAddress: await this.getClientIP(),
       userAgent: navigator.userAgent,
       timestamp: Date.now(),
-      sessionId: this.sessionId
+      sessionId: this.sessionId,
+      orgId: activeOrgId
     };
 
     try {
@@ -75,15 +79,15 @@ class AuditLogger {
     await this.log(userId, userName, 'LOGOUT', 'auth');
   }
 
-  async logCreate(userId: string, userName: string, resource: string, resourceId: string, data: any): Promise<void> {
+  async logCreate<T>(userId: string, userName: string, resource: string, resourceId: string, data: T): Promise<void> {
     await this.log(userId, userName, 'CREATE', resource, resourceId, undefined, data);
   }
 
-  async logUpdate(userId: string, userName: string, resource: string, resourceId: string, oldData: any, newData: any): Promise<void> {
+  async logUpdate<TOld, TNew>(userId: string, userName: string, resource: string, resourceId: string, oldData: TOld, newData: TNew): Promise<void> {
     await this.log(userId, userName, 'UPDATE', resource, resourceId, oldData, newData);
   }
 
-  async logDelete(userId: string, userName: string, resource: string, resourceId: string, data: any): Promise<void> {
+  async logDelete<T>(userId: string, userName: string, resource: string, resourceId: string, data: T): Promise<void> {
     await this.log(userId, userName, 'DELETE', resource, resourceId, data);
   }
 
@@ -95,11 +99,11 @@ class AuditLogger {
     await this.log(userId, userName, 'EXPORT', resource, undefined, undefined, { format });
   }
 
-  async logSettingsChange(userId: string, userName: string, setting: string, oldValue: any, newValue: any): Promise<void> {
+  async logSettingsChange<T>(userId: string, userName: string, setting: string, oldValue: T, newValue: T): Promise<void> {
     await this.log(userId, userName, 'SETTINGS_CHANGE', 'settings', setting, oldValue, newValue);
   }
 
-  async logPermissionChange(userId: string, userName: string, targetUserId: string, oldPermissions: any, newPermissions: any): Promise<void> {
+  async logPermissionChange(userId: string, userName: string, targetUserId: string, oldPermissions: string[] | Record<string, unknown>, newPermissions: string[] | Record<string, unknown>): Promise<void> {
     await this.log(userId, userName, 'PERMISSION_CHANGE', 'user', targetUserId, oldPermissions, newPermissions);
   }
 
@@ -113,7 +117,7 @@ class AuditLogger {
     limit?: number;
   }): Promise<AuditLog[]> {
     try {
-      let logs = await offlineStorage.getAll('audit_logs');
+  let logs = await offlineStorage.getAll('audit_logs') as AuditLog[];
       
       // Apply filters
       if (filters) {

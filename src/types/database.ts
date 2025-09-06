@@ -177,7 +177,7 @@ export interface Document {
   employeeId?: string;
   category: 'passport' | 'visa' | 'certificate' | 'contract' | 'invoice' | 'payslip' | 'other';
   isTemplate: boolean;
-  templateData?: any;
+  templateData?: Record<string, unknown> | null;
   uploadedBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -239,7 +239,7 @@ export interface Notification {
   message: string;
   type: 'info' | 'warning' | 'error' | 'success';
   isRead: boolean;
-  data?: any;
+  data?: Record<string, unknown>;
   createdAt: Date;
 }
 

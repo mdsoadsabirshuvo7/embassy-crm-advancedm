@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export interface Notification {
@@ -32,13 +33,30 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>(() => {
     const saved = localStorage.getItem('notifications');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.map((n: any) => ({
-        ...n,
-        createdAt: new Date(n.createdAt),
-        expiresAt: n.expiresAt ? new Date(n.expiresAt) : undefined
-      }));
+    if (!saved) return [];
+    try {
+      const parsed: unknown = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((n): n is Partial<Notification> => typeof n === 'object' && n !== null)
+          .map((n) => ({
+            // Basic field spreading with fallback defaults
+            id: String(n.id ?? Date.now().toString()),
+            title: String(n.title ?? 'Untitled'),
+            message: String(n.message ?? ''),
+            type: (n.type as Notification['type']) || 'info',
+            priority: (n.priority as Notification['priority']) || 'low',
+            category: (n.category as Notification['category']) || 'system',
+            isRead: Boolean(n.isRead),
+            actionRequired: Boolean(n.actionRequired),
+            actionUrl: typeof n.actionUrl === 'string' ? n.actionUrl : undefined,
+            createdAt: n.createdAt ? new Date(n.createdAt as unknown as string) : new Date(),
+            expiresAt: n.expiresAt ? new Date(n.expiresAt as unknown as string) : undefined,
+            userId: typeof n.userId === 'string' ? n.userId : undefined
+          }));
+      }
+    } catch (e) {
+      console.warn('Failed to parse notifications from storage', e);
     }
     return [];
   });
@@ -139,7 +157,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       sampleNotifications.forEach(n => addNotification(n));
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional single-run demo seeding
+  }, [notifications.length]);
 
   return (
     <NotificationContext.Provider value={{

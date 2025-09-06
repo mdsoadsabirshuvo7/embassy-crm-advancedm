@@ -126,7 +126,9 @@ export class HRService {
     
     const attendance = attendanceDoc.data() as Attendance;
     const clockOut = new Date();
-    const clockIn = attendance.clockIn instanceof Date ? attendance.clockIn : (attendance.clockIn as any).toDate();
+    const clockIn = attendance.clockIn instanceof Date 
+      ? attendance.clockIn 
+      : (attendance.clockIn as { toDate?: () => Date }).toDate?.() || new Date(attendance.clockIn as unknown as string);
     
     const totalMinutes = Math.floor((clockOut.getTime() - clockIn.getTime()) / (1000 * 60));
     const totalHours = Math.max(0, (totalMinutes - attendance.breakDuration) / 60);

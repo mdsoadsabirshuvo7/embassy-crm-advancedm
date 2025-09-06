@@ -1,432 +1,139 @@
-import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { auditLogger, type AuditLog } from '@/utils/auditLogger';
+import { useTenant } from '@/contexts/TenantContext';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Shield, 
-  Search, 
-  Filter, 
-  Download, 
-  Calendar,
-  User,
-  Activity,
-  Eye,
-  Edit,
-  Trash2,
-  Plus,
-  Settings,
-  LogIn,
-  LogOut
-} from 'lucide-react';
-import { auditLogger, type AuditLog } from '../../utils/auditLogger';
-import { format } from 'date-fns';
+import { Input } from '@/components/ui/input';
+import { ExportService } from '@/services/exportService';
 
-const AuditLogViewer: React.FC = () => {
+interface Props { limit?: number }
+
+const ACTION_COLORS: Record<string, string> = {
+  LOGIN: 'bg-green-500/15 text-green-500',
+  LOGOUT: 'bg-gray-500/15 text-gray-500',
+  CREATE: 'bg-blue-500/15 text-blue-500',
+  UPDATE: 'bg-amber-500/15 text-amber-600',
+  DELETE: 'bg-destructive/15 text-destructive',
+  EXPORT: 'bg-purple-500/15 text-purple-500',
+  VIEW: 'bg-muted text-muted-foreground',
+  SETTINGS_CHANGE: 'bg-indigo-500/15 text-indigo-500',
+  PERMISSION_CHANGE: 'bg-rose-500/15 text-rose-500'
+};
+
+const AuditLogViewer: React.FC<Props> = ({ limit = 100 }) => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [filteredLogs, setFilteredLogs] = useState<AuditLog[]>([]);
-  const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  
-  // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
-  const [resourceFilter, setResourceFilter] = useState('all');
-  const [userFilter, setUserFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const { organizations, currentOrgId, switchOrg } = useTenant();
+  const [orgFilter, setOrgFilter] = useState<string | 'all'>(currentOrgId || 'all');
 
-  useEffect(() => {
-    loadAuditLogs();
-    loadAuditStats();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [logs, searchTerm, actionFilter, resourceFilter, userFilter, dateFilter]);
-
-  const loadAuditLogs = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const auditLogs = await auditLogger.getAuditLogs({ limit: 1000 });
-      setLogs(auditLogs);
-    } catch (error) {
-      console.error('Failed to load audit logs:', error);
+  const data = await auditLogger.getAuditLogs({ limit });
+      setLogs(data);
+    } catch (e) {
+      setError('Failed to load audit logs');
+      // eslint-disable-next-line no-console
+      console.error(e);
     } finally {
       setLoading(false);
     }
+  }, [limit]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = useMemo(() => logs.filter(l => {
+    const term = search.toLowerCase();
+    const matchesSearch = !term || [l.userName, l.action, l.resource, l.resourceId].some(v => v?.toLowerCase().includes(term));
+    const matchesAction = actionFilter === 'all' || l.action === actionFilter;
+    const matchesOrg = orgFilter === 'all' || l.orgId === orgFilter;
+    return matchesSearch && matchesAction && matchesOrg;
+  }), [logs, search, actionFilter, orgFilter]);
+
+  const exportLogs = async (format: 'csv' | 'excel' | 'pdf') => {
+    if (filtered.length === 0) return;
+    await ExportService.exportData({
+      filename: 'audit_logs',
+      title: 'Audit Logs',
+      headers: ['Timestamp','User','Action','Resource','Resource ID','Details'],
+      data: filtered.map(l => ({
+        Timestamp: new Date(l.timestamp).toLocaleString(),
+        User: `${l.userName} (${l.userId})`,
+        Action: l.action,
+        Resource: l.resource,
+        'Resource ID': l.resourceId || '',
+        Details: l.newData ? JSON.stringify(l.newData).slice(0,100) : ''
+      })),
+      format
+    });
   };
-
-  const loadAuditStats = async () => {
-    try {
-      const auditStats = await auditLogger.getAuditStats();
-      setStats(auditStats);
-    } catch (error) {
-      console.error('Failed to load audit stats:', error);
-    }
-  };
-
-  const applyFilters = () => {
-    let filtered = [...logs];
-
-    // Search filter
-    if (searchTerm) {
-      filtered = filtered.filter(log => 
-        log.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.resource.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (log.resourceId && log.resourceId.toLowerCase().includes(searchTerm.toLowerCase()))
-      );
-    }
-
-    // Action filter
-    if (actionFilter !== 'all') {
-      filtered = filtered.filter(log => log.action === actionFilter);
-    }
-
-    // Resource filter
-    if (resourceFilter !== 'all') {
-      filtered = filtered.filter(log => log.resource === resourceFilter);
-    }
-
-    // User filter
-    if (userFilter !== 'all') {
-      filtered = filtered.filter(log => log.userId === userFilter);
-    }
-
-    // Date filter
-    if (dateFilter !== 'all') {
-      const now = Date.now();
-      const timeRanges = {
-        today: 24 * 60 * 60 * 1000,
-        week: 7 * 24 * 60 * 60 * 1000,
-        month: 30 * 24 * 60 * 60 * 1000
-      };
-      
-      const timeRange = timeRanges[dateFilter as keyof typeof timeRanges];
-      if (timeRange) {
-        filtered = filtered.filter(log => now - log.timestamp <= timeRange);
-      }
-    }
-
-    setFilteredLogs(filtered);
-  };
-
-  const getActionIcon = (action: string) => {
-    switch (action) {
-      case 'LOGIN': return <LogIn className="w-4 h-4 text-success" />;
-      case 'LOGOUT': return <LogOut className="w-4 h-4 text-muted-foreground" />;
-      case 'CREATE': return <Plus className="w-4 h-4 text-success" />;
-      case 'UPDATE': return <Edit className="w-4 h-4 text-warning" />;
-      case 'DELETE': return <Trash2 className="w-4 h-4 text-destructive" />;
-      case 'VIEW': return <Eye className="w-4 h-4 text-primary" />;
-      case 'EXPORT': return <Download className="w-4 h-4 text-primary" />;
-      case 'SETTINGS_CHANGE': return <Settings className="w-4 h-4 text-warning" />;
-      default: return <Activity className="w-4 h-4 text-muted-foreground" />;
-    }
-  };
-
-  const getActionColor = (action: string) => {
-    switch (action) {
-      case 'DELETE': return 'bg-destructive text-destructive-foreground';
-      case 'UPDATE': 
-      case 'SETTINGS_CHANGE': return 'bg-warning text-warning-foreground';
-      case 'CREATE': 
-      case 'LOGIN': return 'bg-success text-success-foreground';
-      default: return 'bg-primary text-primary-foreground';
-    }
-  };
-
-  const exportAuditLogs = async () => {
-    try {
-      const csvContent = [
-        ['Timestamp', 'User', 'Action', 'Resource', 'Resource ID', 'IP Address'].join(','),
-        ...filteredLogs.map(log => [
-          format(new Date(log.timestamp), 'yyyy-MM-dd HH:mm:ss'),
-          log.userName,
-          log.action,
-          log.resource,
-          log.resourceId || '',
-          log.ipAddress || ''
-        ].join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `audit-logs-${format(new Date(), 'yyyy-MM-dd')}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Failed to export audit logs:', error);
-    }
-  };
-
-  const uniqueUsers = [...new Set(logs.map(log => ({ id: log.userId, name: log.userName })))];
-  const uniqueActions = [...new Set(logs.map(log => log.action))];
-  const uniqueResources = [...new Set(logs.map(log => log.resource))];
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold">Audit Log Viewer</h1>
-            <p className="text-muted-foreground">
-              Track and monitor all system activities
-            </p>
+    <Card className="border-0 bg-card/80 backdrop-blur-sm">
+      <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between space-y-0">
+        <CardTitle className="text-base">Audit Logs</CardTitle>
+        <div className="flex flex-col md:flex-row gap-2 md:items-center">
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => exportLogs('csv')} disabled={loading || filtered.length===0}>CSV</Button>
+            <Button size="sm" variant="outline" onClick={() => exportLogs('excel')} disabled={loading || filtered.length===0}>Excel</Button>
+            <Button size="sm" variant="outline" onClick={() => exportLogs('pdf')} disabled={loading || filtered.length===0}>PDF</Button>
+            <Button size="sm" onClick={load} disabled={loading}>Refresh</Button>
+            {organizations.length > 1 && (
+              <select
+                value={orgFilter}
+                onChange={e => {
+                  const val = e.target.value as string | 'all';
+                  setOrgFilter(val);
+                  if (val !== 'all') switchOrg(val);
+                }}
+                className="border bg-background rounded px-2 py-1 text-xs"
+              >
+                <option value="all">All Orgs</option>
+                {organizations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            )}
           </div>
         </div>
-        <Button onClick={exportAuditLogs}>
-          <Download className="w-4 h-4 mr-2" />
-          Export Logs
-        </Button>
-      </div>
-
-      <Tabs defaultValue="logs" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="logs">Audit Logs</TabsTrigger>
-          <TabsTrigger value="statistics">Statistics</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance Report</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="logs" className="space-y-6">
-          {/* Filters */}
-          <Card className="border-0 bg-card/80 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Filter className="w-5 h-5" />
-                Filters
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Search</label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search logs..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-col md:flex-row gap-3">
+          <Input placeholder="Search user, action, resource..." value={search} onChange={e => setSearch(e.target.value)} className="md:max-w-xs" />
+          <select value={actionFilter} onChange={e => setActionFilter(e.target.value)} className="border bg-background rounded px-2 py-1 text-xs">
+            <option value="all">All Actions</option>
+            {Array.from(new Set(logs.map(l => l.action))).map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <div className="text-xs text-muted-foreground self-center">{filtered.length} / {logs.length} entries</div>
+        </div>
+        <div className="space-y-2 max-h-96 overflow-auto pr-1">
+          {error && <div className="text-destructive text-xs">{error}</div>}
+          {loading && <div className="text-muted-foreground">Loading...</div>}
+          {!loading && filtered.length === 0 && !error && <div className="text-muted-foreground">No audit logs match filters.</div>}
+          {!loading && filtered.map(l => (
+            <div key={`${l.timestamp}_${l.userId}_${l.action}`} className="flex items-start justify-between border-b border-border/40 py-2">
+              <div className="space-y-1 pr-4 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={ACTION_COLORS[l.action] || 'bg-muted'}>{l.action}</Badge>
+                  <span className="font-medium truncate max-w-[140px]">{l.userName}</span>
+                  <span className="text-muted-foreground text-[10px]">{l.resource}</span>
+                  {l.resourceId && <code className="text-[10px] bg-muted px-1 rounded">{l.resourceId}</code>}
                 </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Action</label>
-                  <Select value={actionFilter} onValueChange={setActionFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Actions</SelectItem>
-                      {uniqueActions.map(action => (
-                        <SelectItem key={action} value={action}>{action}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Resource</label>
-                  <Select value={resourceFilter} onValueChange={setResourceFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Resources</SelectItem>
-                      {uniqueResources.map(resource => (
-                        <SelectItem key={resource} value={resource}>{resource}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">User</label>
-                  <Select value={userFilter} onValueChange={setUserFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Users</SelectItem>
-                      {uniqueUsers.map(user => (
-                        <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Time Range</label>
-                  <Select value={dateFilter} onValueChange={setDateFilter}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Time</SelectItem>
-                      <SelectItem value="today">Today</SelectItem>
-                      <SelectItem value="week">This Week</SelectItem>
-                      <SelectItem value="month">This Month</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <div className="text-[10px] text-muted-foreground">{new Date(l.timestamp).toLocaleString()} • Session {l.sessionId?.slice(-6)}</div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Logs List */}
-          <Card className="border-0 bg-card/80 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle>Activity Log</CardTitle>
-              <CardDescription>
-                Showing {filteredLogs.length} of {logs.length} entries
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="text-center py-8">
-                  <div className="text-muted-foreground">Loading audit logs...</div>
-                </div>
-              ) : filteredLogs.length === 0 ? (
-                <div className="text-center py-8">
-                  <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-muted-foreground">No logs found</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Try adjusting your filters or search criteria.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {filteredLogs.map((log, index) => (
-                    <div key={`${log.id || index}`} className="flex items-center gap-4 p-3 border border-border rounded-lg hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center gap-2">
-                        {getActionIcon(log.action)}
-                        <Badge className={getActionColor(log.action)}>
-                          {log.action}
-                        </Badge>
-                      </div>
-                      
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="font-medium">{log.userName}</span>
-                          <span className="text-muted-foreground">performed</span>
-                          <span className="font-medium">{log.action.toLowerCase()}</span>
-                          <span className="text-muted-foreground">on</span>
-                          <span className="font-medium">{log.resource}</span>
-                          {log.resourceId && (
-                            <>
-                              <span className="text-muted-foreground">ID:</span>
-                              <code className="text-xs bg-muted px-1 rounded">{log.resourceId}</code>
-                            </>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
-                          <span>{format(new Date(log.timestamp), 'MMM dd, yyyy HH:mm:ss')}</span>
-                          {log.ipAddress && <span>IP: {log.ipAddress}</span>}
-                          {log.sessionId && <span>Session: {log.sessionId.slice(-8)}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {l.newData && (
+                <code className="text-[10px] bg-muted px-1 py-0.5 rounded max-w-[180px] truncate" title={JSON.stringify(l.newData)}>
+                  {JSON.stringify(l.newData)}
+                </code>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="statistics" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="border-0 bg-card/80 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle>Total Actions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-primary">
-                  {stats.totalActions || 0}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 bg-card/80 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle>Actions by Type</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {Object.entries(stats.actionsByType || {}).map(([action, count]) => (
-                  <div key={action} className="flex justify-between items-center">
-                    <span className="text-sm">{action}</span>
-                    <Badge variant="outline">{count as number}</Badge>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 bg-card/80 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle>Resource Access</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {Object.entries(stats.resourceAccess || {}).map(([resource, count]) => (
-                  <div key={resource} className="flex justify-between items-center">
-                    <span className="text-sm">{resource}</span>
-                    <Badge variant="outline">{count as number}</Badge>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card className="border-0 bg-card/80 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {(stats.recentActivity || []).slice(0, 5).map((log: AuditLog, index: number) => (
-                  <div key={index} className="flex items-center gap-3 p-2 rounded">
-                    {getActionIcon(log.action)}
-                    <span className="text-sm">
-                      <strong>{log.userName}</strong> {log.action.toLowerCase()} {log.resource}
-                    </span>
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {format(new Date(log.timestamp), 'MMM dd, HH:mm')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="compliance" className="space-y-6">
-          <Card className="border-0 bg-card/80 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle>Compliance Report</CardTitle>
-              <CardDescription>
-                Generate compliance reports for audit and regulatory purposes
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8">
-                <Shield className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold">Compliance Reporting</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Advanced compliance reporting features available
-                </p>
-                <Button>Generate Report</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

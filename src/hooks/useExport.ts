@@ -4,8 +4,8 @@ import { ExportService, ExportFormat } from '@/services/exportService';
 export const useExport = () => {
   const [isExporting, setIsExporting] = useState(false);
 
-  const exportData = async (
-    data: any[],
+  const exportData = async <Row extends Record<string, unknown>>( 
+    data: Row[],
     filename: string,
     title: string,
     headers: string[],
@@ -27,103 +27,30 @@ export const useExport = () => {
     }
   };
 
-  const exportEmployees = async (employees: any[], format: ExportFormat) => {
+  const exportEmployees = async (employees: Array<{ name: string; email: string; id: string; department: string; position: string; salary: number; status: string; joinDate: string | Date; }>, format: ExportFormat) => {
     return ExportService.exportEmployees(employees, format);
   };
 
-  const exportPayroll = async (payroll: any[], format: ExportFormat) => {
+  const exportPayroll = async (payroll: Array<{ employee: string; baseSalary: number; bonus: number; deductions: number; netPay: number; status: string; }>, format: ExportFormat) => {
     return ExportService.exportPayroll(payroll, format);
   };
 
-  const exportLeaveRequests = async (leaves: any[], format: ExportFormat) => {
+  const exportLeaveRequests = async (leaves: Array<{ id: string; employee: string; type: string; startDate: string | Date; endDate: string | Date; days: number; status: string; reason: string; }>, format: ExportFormat) => {
     return ExportService.exportLeaveRequests(leaves, format);
   };
 
-  const exportDepartments = async (departments: any[], format: ExportFormat) => {
+  const exportDepartments = async (departments: Array<{ name: string; description: string; managerName?: string; employeeCount: number; budget: number; isActive: boolean; }>, format: ExportFormat) => {
     return ExportService.exportDepartments(departments, format);
   };
 
   // Universal exports for other modules
-  const exportClients = async (clients: any[], format: ExportFormat) => {
-    const headers = ['Name', 'Email', 'Phone', 'Company', 'Nationality', 'Status', 'Assigned To'];
-    const data = clients.map(client => ({
-      'Name': client.name,
-      'Email': client.email,
-      'Phone': client.phone,
-      'Company': client.company || 'N/A',
-      'Nationality': client.nationality,
-      'Status': client.status,
-      'Assigned To': client.assignedTo
-    }));
+  const exportClients = (clients: Array<{ name: string; email: string; phone: string; company?: string; nationality: string; status: string; assignedTo: string; }>, format: ExportFormat) => ExportService.exportClients(clients, format);
 
-    return ExportService.exportData({
-      filename: 'clients',
-      title: 'Clients Report',
-      headers,
-      data,
-      format
-    });
-  };
+  const exportInvoices = (invoices: Array<{ number: string; clientName: string; issueDate: string | Date; dueDate: string | Date; total: number; status: string; }>, format: ExportFormat) => ExportService.exportInvoices(invoices, format);
 
-  const exportInvoices = async (invoices: any[], format: ExportFormat) => {
-    const headers = ['Invoice Number', 'Client', 'Issue Date', 'Due Date', 'Amount', 'Status'];
-    const data = invoices.map(invoice => ({
-      'Invoice Number': invoice.number,
-      'Client': invoice.clientName,
-      'Issue Date': invoice.issueDate,
-      'Due Date': invoice.dueDate,
-      'Amount': invoice.total,
-      'Status': invoice.status
-    }));
+  const exportExpenses = (expenses: Array<{ description: string; amount: number; category: string; date: string | Date; employee: string; status: string; }>, format: ExportFormat) => ExportService.exportExpensesGeneric(expenses, format);
 
-    return ExportService.exportData({
-      filename: 'invoices',
-      title: 'Invoices Report',
-      headers,
-      data,
-      format
-    });
-  };
-
-  const exportExpenses = async (expenses: any[], format: ExportFormat) => {
-    const headers = ['Description', 'Amount', 'Category', 'Date', 'Employee', 'Status'];
-    const data = expenses.map(expense => ({
-      'Description': expense.description,
-      'Amount': expense.amount,
-      'Category': expense.category,
-      'Date': expense.date,
-      'Employee': expense.employee,
-      'Status': expense.status
-    }));
-
-    return ExportService.exportData({
-      filename: 'expenses',
-      title: 'Expenses Report',
-      headers,
-      data,
-      format
-    });
-  };
-
-  const exportTasks = async (tasks: any[], format: ExportFormat) => {
-    const headers = ['Title', 'Assigned To', 'Priority', 'Status', 'Due Date', 'Client'];
-    const data = tasks.map(task => ({
-      'Title': task.title,
-      'Assigned To': task.assignedTo,
-      'Priority': task.priority,
-      'Status': task.status,
-      'Due Date': task.dueDate,
-      'Client': task.clientName || 'N/A'
-    }));
-
-    return ExportService.exportData({
-      filename: 'tasks',
-      title: 'Tasks Report',
-      headers,
-      data,
-      format
-    });
-  };
+  const exportTasks = (tasks: Array<{ title: string; assignedTo: string; priority: string; status: string; dueDate: string | Date; clientName?: string; }>, format: ExportFormat) => ExportService.exportTasks(tasks, format);
 
   return {
     isExporting,

@@ -30,7 +30,7 @@ export class DocumentService {
       employeeId?: string;
       category: Document['category'];
       isTemplate?: boolean;
-      templateData?: any;
+  templateData?: Record<string, unknown>;
     }
   ): Promise<Document> {
     try {
@@ -183,7 +183,7 @@ export class DocumentService {
 
   static async generateDocumentFromTemplate(
     templateId: string,
-    data: Record<string, any>,
+  data: Record<string, unknown>,
     orgId: string,
     createdBy: string,
     metadata: {

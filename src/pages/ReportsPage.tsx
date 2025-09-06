@@ -78,6 +78,31 @@ const ReportsPage: React.FC = () => {
     { name: 'Ali Hassan', clients: 29, revenue: 185000, completion: 87, rating: 4.5 }
   ];
 
+  // Dynamic report builder state (placed after dataset declarations to avoid TDZ)
+  const datasets = {
+    revenueByService,
+    clientsByCountry,
+    employeePerformance,
+    monthlyTrends,
+  } as const;
+  type DatasetKey = keyof typeof datasets;
+  const [selectedDataset, setSelectedDataset] = useState<DatasetKey>('revenueByService');
+  const allColumns = (key: DatasetKey) => Object.keys(datasets[key][0] || {});
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(allColumns('revenueByService'));
+  const toggleColumn = (col: string) => {
+    setVisibleColumns(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
+  };
+  const currentRows = datasets[selectedDataset];
+  const exportHeaders = visibleColumns;
+  type DatasetRow = Record<string, unknown>;
+  const getCell = (row: DatasetRow, key: string): unknown => row[key];
+  const exportData = (currentRows as DatasetRow[]).map(r => {
+    const out: Record<string, unknown> = {};
+    visibleColumns.forEach(c => { out[c] = getCell(r, c); });
+    return out;
+  });
+
+
   const recentActivities = [
     { type: 'revenue', description: 'New invoice paid by Ahmed Hassan', amount: 25000, time: '2 hours ago' },
     { type: 'client', description: 'New client registration - Maria Santos', time: '4 hours ago' },
@@ -184,12 +209,13 @@ const ReportsPage: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="revenue">Revenue</TabsTrigger>
           <TabsTrigger value="clients">Clients</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="trends">Trends</TabsTrigger>
+          <TabsTrigger value="builder">Report Builder</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -519,6 +545,91 @@ const ReportsPage: React.FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="builder" className="space-y-6">
+          <Card className="border-0 bg-card/80 backdrop-blur-sm">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Dynamic Report Builder</CardTitle>
+                  <CardDescription>Create custom exports from predefined datasets</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <ExportDropdown
+                    data={exportData}
+                    filename={`custom_${selectedDataset}`}
+                    title={`Custom Report - ${selectedDataset}`}
+                    headers={exportHeaders}
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Dataset</Label>
+                  <Select value={selectedDataset} onValueChange={(v) => { const k = v as DatasetKey; setSelectedDataset(k); setVisibleColumns(allColumns(k)); }}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="revenueByService">Revenue By Service</SelectItem>
+                      <SelectItem value="clientsByCountry">Clients By Country</SelectItem>
+                      <SelectItem value="employeePerformance">Employee Performance</SelectItem>
+                      <SelectItem value="monthlyTrends">Monthly Trends</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Columns</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {allColumns(selectedDataset).map(col => {
+                      const active = visibleColumns.includes(col);
+                      return (
+                        <button
+                          type="button"
+                          key={col}
+                          onClick={() => toggleColumn(col)}
+                          className={`text-xs px-2 py-1 rounded border transition ${active ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground hover:bg-accent'} `}
+                        >
+                          {active ? '✓ ' : ''}{col}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {visibleColumns.map(col => (
+                        <TableHead key={col} className="capitalize">{col.replace(/([A-Z])/g,' $1').trim()}</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {currentRows.map((row, idx) => (
+                      <TableRow key={idx}>
+                        {visibleColumns.map(col => {
+                          const value = (row as Record<string, unknown>)[col];
+                          return (
+                            <TableCell key={col} className="text-sm font-mono">
+                              {typeof value === 'number' ? value.toLocaleString() : String(value)}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {currentRows.length === 0 && (
+                  <p className="text-sm text-muted-foreground py-6 text-center">No data available for this dataset.</p>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -1,20 +1,19 @@
-import jsPDF from 'jspdf';
-import * as XLSX from 'xlsx';
+// Heavy libraries (jsPDF, xlsx) are loaded on demand via dynamic import to reduce initial bundle size
 import { saveAs } from 'file-saver';
 
 export type ExportFormat = 'pdf' | 'excel' | 'csv';
 
-export interface ExportOptions {
+export interface ExportOptions<Row extends Record<string, unknown> = Record<string, unknown>> {
   filename: string;
   title: string;
-  headers: string[];
-  data: any[];
+  headers: string[]; // Ordered list of column headers expected to map to row keys or heuristics
+  data: Row[];       // Array of homogeneous row objects
   format: ExportFormat;
   includeDate?: boolean;
 }
 
 export class ExportService {
-  static async exportData(options: ExportOptions): Promise<void> {
+  static async exportData<Row extends Record<string, unknown>>(options: ExportOptions<Row>): Promise<void> {
     const { format, filename, title, headers, data, includeDate = true } = options;
     
     const timestamp = includeDate ? `_${new Date().toISOString().split('T')[0]}` : '';
@@ -33,7 +32,8 @@ export class ExportService {
     }
   }
 
-  private static exportToPDF(filename: string, title: string, headers: string[], data: any[]): void {
+  private static async exportToPDF<Row extends Record<string, unknown>>(filename: string, title: string, headers: string[], data: Row[]): Promise<void> {
+    const { default: jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     
     // Add title
@@ -61,7 +61,7 @@ export class ExportService {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     
-    data.forEach((row) => {
+  data.forEach((row) => {
       if (yPosition > 270) { // Start new page if needed
         doc.addPage();
         yPosition = 20;
@@ -79,7 +79,8 @@ export class ExportService {
     doc.save(`${filename}.pdf`);
   }
 
-  private static exportToExcel(filename: string, title: string, headers: string[], data: any[]): void {
+  private static async exportToExcel<Row extends Record<string, unknown>>(filename: string, title: string, headers: string[], data: Row[]): Promise<void> {
+    const XLSX = await import('xlsx');
     const worksheet = XLSX.utils.json_to_sheet(data);
     const workbook = XLSX.utils.book_new();
     
@@ -92,10 +93,10 @@ export class ExportService {
     worksheet['!cols'] = colWidths;
     
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Data');
-    XLSX.writeFile(workbook, `${filename}.xlsx`);
+  XLSX.writeFile(workbook, `${filename}.xlsx`);
   }
 
-  private static exportToCSV(filename: string, headers: string[], data: any[]): void {
+  private static exportToCSV<Row extends Record<string, unknown>>(filename: string, headers: string[], data: Row[]): void {
     const csvContent = [
       headers.join(','),
       ...data.map(row => 
@@ -112,7 +113,9 @@ export class ExportService {
   }
 
   // Specialized export methods for different data types
-  static async exportEmployees(employees: any[], format: ExportFormat): Promise<void> {
+  static async exportEmployees(employees: Array<{
+    name: string; email: string; id: string; department: string; position: string; salary: number; status: string; joinDate: string | Date;
+  }>, format: ExportFormat): Promise<void> {
     const headers = ['Name', 'Email', 'Employee ID', 'Department', 'Position', 'Salary', 'Status', 'Join Date'];
     const data = employees.map(emp => ({
       'Name': emp.name,
@@ -134,7 +137,9 @@ export class ExportService {
     });
   }
 
-  static async exportPayroll(payroll: any[], format: ExportFormat): Promise<void> {
+  static async exportPayroll(payroll: Array<{
+    employee: string; baseSalary: number; bonus: number; deductions: number; netPay: number; status: string;
+  }>, format: ExportFormat): Promise<void> {
     const headers = ['Employee', 'Base Salary', 'Bonus', 'Deductions', 'Net Pay', 'Status'];
     const data = payroll.map(p => ({
       'Employee': p.employee,
@@ -154,7 +159,9 @@ export class ExportService {
     });
   }
 
-  static async exportLeaveRequests(leaves: any[], format: ExportFormat): Promise<void> {
+  static async exportLeaveRequests(leaves: Array<{
+    id: string; employee: string; type: string; startDate: string | Date; endDate: string | Date; days: number; status: string; reason: string;
+  }>, format: ExportFormat): Promise<void> {
     const headers = ['Request ID', 'Employee', 'Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
     const data = leaves.map(leave => ({
       'Request ID': leave.id,
@@ -176,7 +183,9 @@ export class ExportService {
     });
   }
 
-  static async exportDepartments(departments: any[], format: ExportFormat): Promise<void> {
+  static async exportDepartments(departments: Array<{
+    name: string; description: string; managerName?: string; employeeCount: number; budget: number; isActive: boolean;
+  }>, format: ExportFormat): Promise<void> {
     const headers = ['Name', 'Description', 'Manager', 'Employee Count', 'Budget', 'Status'];
     const data = departments.map(dept => ({
       'Name': dept.name,
@@ -196,8 +205,61 @@ export class ExportService {
     });
   }
 
+  static async exportClients(clients: Array<{ name: string; email: string; phone: string; company?: string; nationality: string; status: string; assignedTo: string; }>, format: ExportFormat): Promise<void> {
+    const headers = ['Name', 'Email', 'Phone', 'Company', 'Nationality', 'Status', 'Assigned To'];
+    const data = clients.map(client => ({
+      'Name': client.name,
+      'Email': client.email,
+      'Phone': client.phone,
+      'Company': client.company || 'N/A',
+      'Nationality': client.nationality,
+      'Status': client.status,
+      'Assigned To': client.assignedTo
+    }));
+    return this.exportData({ filename: 'clients', title: 'Clients Report', headers, data, format });
+  }
+
+  static async exportInvoices(invoices: Array<{ number: string; clientName: string; issueDate: string | Date; dueDate: string | Date; total: number; status: string; }>, format: ExportFormat): Promise<void> {
+    const headers = ['Invoice Number', 'Client', 'Issue Date', 'Due Date', 'Amount', 'Status'];
+    const data = invoices.map(inv => ({
+      'Invoice Number': inv.number,
+      'Client': inv.clientName,
+      'Issue Date': inv.issueDate,
+      'Due Date': inv.dueDate,
+      'Amount': inv.total,
+      'Status': inv.status
+    }));
+    return this.exportData({ filename: 'invoices', title: 'Invoices Report', headers, data, format });
+  }
+
+  static async exportExpensesGeneric(expenses: Array<{ description: string; amount: number; category: string; date: string | Date; employee: string; status: string; }>, format: ExportFormat): Promise<void> {
+    const headers = ['Description', 'Amount', 'Category', 'Date', 'Employee', 'Status'];
+    const data = expenses.map(exp => ({
+      'Description': exp.description,
+      'Amount': exp.amount,
+      'Category': exp.category,
+      'Date': exp.date,
+      'Employee': exp.employee,
+      'Status': exp.status
+    }));
+    return this.exportData({ filename: 'expenses', title: 'Expenses Report', headers, data, format });
+  }
+
+  static async exportTasks(tasks: Array<{ title: string; assignedTo: string; priority: string; status: string; dueDate: string | Date; clientName?: string; }>, format: ExportFormat): Promise<void> {
+    const headers = ['Title', 'Assigned To', 'Priority', 'Status', 'Due Date', 'Client'];
+    const data = tasks.map(task => ({
+      'Title': task.title,
+      'Assigned To': task.assignedTo,
+      'Priority': task.priority,
+      'Status': task.status,
+      'Due Date': task.dueDate,
+      'Client': task.clientName || 'N/A'
+    }));
+    return this.exportData({ filename: 'tasks', title: 'Tasks Report', headers, data, format });
+  }
+
   // Heuristic mapping to resolve header labels to object keys
-  private static getCellValue(row: any, header: string): any {
+  private static getCellValue(row: Record<string, unknown>, header: string): unknown {
     if (!row) return '';
 
     if (header in row) return row[header];

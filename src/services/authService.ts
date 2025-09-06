@@ -50,8 +50,8 @@ export class AuthService {
       }
       
       return userData;
-    } catch (error: any) {
-      if (error.message.includes('demo')) {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes('demo')) {
         throw error;
       }
       throw new Error('Invalid email or password');
@@ -86,8 +86,9 @@ export class AuthService {
       
       await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
       return newUser;
-    } catch (error: any) {
-      throw new Error(error.message || 'User creation failed');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'User creation failed';
+      throw new Error(message);
     }
   }
 

@@ -22,10 +22,11 @@ export const LoginForm: React.FC = () => {
         title: "Login successful",
         description: "Welcome back to Embassy CRM",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Invalid credentials';
       toast({
         title: "Login Failed",
-        description: error.message || "Invalid credentials",
+        description: message,
         variant: "destructive"
       });
     }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useExport } from '@/hooks/useExport';
@@ -15,6 +15,11 @@ import { ExpenseViewModal } from '@/components/expense/ExpenseViewModal';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Expense } from '@/types/expense';
+import { convert, formatMoney } from '@/services/currencyService';
+// Data now sourced via React Query hook (gradual migration off DataContext)
+import { useExpensesQuery } from '@/hooks/useExpensesQuery';
+import { useAuth } from '@/contexts/AuthContext';
+import { getStatusClass } from '@/utils/statusClasses';
 import { 
   CreditCard, 
   Plus, 
@@ -38,114 +43,20 @@ import {
   Fuel,
   Home,
   Briefcase,
-  Plane
+  Plane,
+  Columns3
 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { can } from '@/utils/permissions';
 
 // Expense interface is now imported from types/expense.ts
 
-const mockExpenses: Expense[] = [
-  {
-    id: '1',
-    orgId: 'demo-org',
-    description: 'Client meeting lunch',
-    amount: 1200,
-    currency: 'BDT',
-    category: 'Meals',
-    subcategory: 'Business Meals',
-    date: '2024-01-20',
-    paymentMethod: 'card',
-    vendor: 'Restaurant ABC',
-    receipt: 'receipt_001.jpg',
-    status: 'approved',
-    submittedBy: { id: '1', name: 'Sarah Ahmed' },
-    approvedBy: { id: '2', name: 'Mike Manager' },
-    project: 'Client Onboarding',
-    billable: true,
-    tags: ['client', 'meeting'],
-    createdAt: new Date('2024-01-20'),
-    updatedAt: new Date('2024-01-20')
-  },
-  {
-    id: '2',
-    description: 'Fuel for embassy visit',
-    amount: 800,
-    currency: 'BDT',
-    category: 'Transportation',
-    subcategory: 'Fuel',
-    date: '2024-01-19',
-    orgId: 'demo-org',
-    paymentMethod: 'cash',
-    vendor: 'Petrol Station XYZ',
-    status: 'submitted',
-    submittedBy: { id: '3', name: 'Mohammed Khan' },
-    billable: true,
-    tags: ['embassy', 'travel'],
-    createdAt: new Date('2024-01-19'),
-    updatedAt: new Date('2024-01-19')
-  },
-  {
-    id: '3',
-    orgId: 'demo-org',
-    description: 'Office supplies purchase',
-    amount: 2500,
-    currency: 'BDT',
-    category: 'Office',
-    subcategory: 'Supplies',
-    date: '2024-01-18',
-    paymentMethod: 'card',
-    vendor: 'Office Mart',
-    receipt: 'receipt_002.pdf',
-    status: 'reimbursed',
-    submittedBy: { id: '4', name: 'Fatima Rahman' },
-    approvedBy: { id: '2', name: 'Mike Manager' },
-    billable: false,
-    tags: ['supplies', 'office'],
-    createdAt: new Date('2024-01-18'),
-    updatedAt: new Date('2024-01-18')
-  },
-  {
-    id: '4',
-    orgId: 'demo-org',
-    description: 'International courier service',
-    amount: 45,
-    currency: 'USD',
-    category: 'Shipping',
-    subcategory: 'International',
-    date: '2024-01-17',
-    paymentMethod: 'bank_transfer',
-    vendor: 'DHL Express',
-    receipt: 'receipt_003.pdf',
-    status: 'approved',
-    submittedBy: { id: '1', name: 'Sarah Ahmed' },
-    approvedBy: { id: '2', name: 'Mike Manager' },
-    project: 'Document Processing',
-    billable: true,
-    tags: ['courier', 'documents'],
-    createdAt: new Date('2024-01-17'),
-    updatedAt: new Date('2024-01-17')
-  },
-  {
-    id: '5',
-    orgId: 'demo-org',
-    description: 'Software subscription renewal',
-    amount: 99,
-    currency: 'USD',
-    category: 'Software',
-    subcategory: 'Subscriptions',
-    date: '2024-01-15',
-    paymentMethod: 'card',
-    vendor: 'SaaS Provider',
-    status: 'draft',
-    submittedBy: { id: '5', name: 'Ali Hassan' },
-    billable: false,
-    tags: ['software', 'subscription'],
-    createdAt: new Date('2024-01-15'),
-    updatedAt: new Date('2024-01-15')
-  }
-];
+// Removed mockExpenses. Data now comes from DataContext/localStorage.
 
 const ExpensesPage: React.FC = () => {
-  const [expenses, setExpenses] = useState<Expense[]>(mockExpenses);
+  const { expensesQuery, addExpense, updateExpense } = useExpensesQuery();
+  const expenses = expensesQuery.data ?? [];
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -156,8 +67,28 @@ const ExpensesPage: React.FC = () => {
   const [viewingExpense, setViewingExpense] = useState<Expense | null>(null);
   const [activeTab, setActiveTab] = useState('all');
   const { exportExpenses, isExporting } = useExport();
+  // Column visibility state (persisted)
+  const allColumns = ['date','description','category','vendor','amount','submittedBy','status','actions'] as const;
+  type ColumnKey = typeof allColumns[number];
+  const [visibleCols, setVisibleCols] = useState<ColumnKey[]>(() => {
+    const saved = localStorage.getItem('expenses_table_cols');
+    if (saved) {
+      try { return JSON.parse(saved); } catch { /* ignore */ }
+    }
+    return ['date','description','category','vendor','amount','submittedBy','status','actions'];
+  });
 
-  const filteredExpenses = expenses.filter(expense => {
+  useEffect(() => {
+    localStorage.setItem('expenses_table_cols', JSON.stringify(visibleCols));
+  }, [visibleCols]);
+
+  const toggleColumn = (col: ColumnKey) => {
+    setVisibleCols(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
+  };
+
+  const isColVisible = (c: ColumnKey) => visibleCols.includes(c);
+
+  const filteredExpenses = useMemo(() => expenses.filter(expense => {
     const matchesSearch = expense.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          expense.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          expense.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -168,18 +99,9 @@ const ExpensesPage: React.FC = () => {
                       (activeTab === 'approved' && expense.status === 'approved') ||
                       (activeTab === 'reimbursed' && expense.status === 'reimbursed');
     return matchesSearch && matchesCategory && matchesStatus && matchesTab;
-  });
+  }), [expenses, searchTerm, categoryFilter, statusFilter, activeTab]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'approved': return 'bg-success text-success-foreground';
-      case 'reimbursed': return 'bg-primary text-primary-foreground';
-      case 'submitted': return 'bg-warning text-warning-foreground';
-      case 'draft': return 'bg-muted text-muted-foreground';
-      case 'rejected': return 'bg-destructive text-destructive-foreground';
-      default: return 'bg-secondary text-secondary-foreground';
-    }
-  };
+  // Status classes imported statically for performance & type safety
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
@@ -193,10 +115,7 @@ const ExpensesPage: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number, currency: string) => {
-    const symbol = currency === 'BDT' ? '৳' : '$';
-    return `${symbol}${amount.toLocaleString()}`;
-  };
+  const formatCurrency = (amount: number, currency: 'BDT' | 'USD') => formatMoney(amount, currency);
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
@@ -209,23 +128,17 @@ const ExpensesPage: React.FC = () => {
   };
 
   const handleSaveEdit = (updatedExpense: Expense) => {
-    setExpenses(prev => prev.map(exp => 
-      exp.id === updatedExpense.id ? updatedExpense : exp
-    ));
+  updateExpense(updatedExpense.id, updatedExpense);
     setIsEditModalOpen(false);
     setEditingExpense(null);
   };
 
   const handleStatusUpdate = (expenseId: string, newStatus: Expense['status']) => {
-    setExpenses(prev => prev.map(exp => 
-      exp.id === expenseId 
-        ? { 
-            ...exp, 
-            status: newStatus,
-            ...(newStatus === 'approved' ? { approvedBy: { id: '2', name: 'Mike Manager' } } : {})
-          }
-        : exp
-    ));
+    if (!user || !can(user.role, 'expenses:approve')) return;
+    updateExpense(expenseId, {
+      status: newStatus,
+      ...(newStatus === 'approved' && user ? { approvedBy: { id: user.id, name: user.name } } : {})
+    });
   };
 
   const ExpenseCreateModal = () => (
@@ -350,31 +263,51 @@ const ExpensesPage: React.FC = () => {
         
         <DialogFooter>
           <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
-          <Button>Add Expense</Button>
+          <Button
+            onClick={() => {
+              const description = (document.getElementById('description') as HTMLInputElement)?.value || '';
+              const amountValue = Number((document.getElementById('amount') as HTMLInputElement)?.value || 0);
+              const currency = (document.querySelector('[id="currency"]') as HTMLSelectElement)?.value as 'BDT' | 'USD' || 'BDT';
+              const categoryEl = document.querySelector('[id="category"]') as HTMLSelectElement;
+              const category = categoryEl?.value || 'Other';
+              const paymentMethodEl = document.querySelector('[id="paymentMethod"]') as HTMLSelectElement;
+              const paymentMethod = (paymentMethodEl?.value || 'cash') as Expense['paymentMethod'];
+              const vendor = (document.getElementById('vendor') as HTMLInputElement)?.value || '';
+              const date = (document.getElementById('date') as HTMLInputElement)?.value || new Date().toISOString().split('T')[0];
+              const tagsRaw = (document.getElementById('tags') as HTMLInputElement)?.value || '';
+              const notes = (document.getElementById('notes') as HTMLTextAreaElement)?.value || '';
+              const billable = (document.getElementById('billable') as HTMLInputElement)?.checked || false;
+              if (!user) return;
+              addExpense({
+                orgId: 'demo-org',
+                description,
+                amount: amountValue,
+                currency,
+                category,
+                date,
+                paymentMethod,
+                vendor,
+                status: 'draft',
+                submittedBy: { id: user.id, name: user.name },
+                billable,
+                tags: tagsRaw.split(',').map(t => t.trim()).filter(Boolean),
+                // Optional fields omitted for brevity
+              } as unknown as Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>);
+              setIsCreateModalOpen(false);
+            }}
+          >Add Expense</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 
-  const totalExpenses = filteredExpenses.reduce((sum, expense) => {
-    const amount = expense.currency === 'USD' ? expense.amount * 110 : expense.amount; // Convert USD to BDT for summary
-    return sum + amount;
-  }, 0);
+  const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + convert(expense.amount, expense.currency, 'BDT'), 0);
 
-  const approvedExpenses = filteredExpenses.filter(exp => exp.status === 'approved').reduce((sum, expense) => {
-    const amount = expense.currency === 'USD' ? expense.amount * 110 : expense.amount;
-    return sum + amount;
-  }, 0);
+  const approvedExpenses = filteredExpenses.filter(exp => exp.status === 'approved').reduce((sum, expense) => sum + convert(expense.amount, expense.currency, 'BDT'), 0);
 
-  const pendingExpenses = filteredExpenses.filter(exp => ['draft', 'submitted'].includes(exp.status)).reduce((sum, expense) => {
-    const amount = expense.currency === 'USD' ? expense.amount * 110 : expense.amount;
-    return sum + amount;
-  }, 0);
+  const pendingExpenses = filteredExpenses.filter(exp => ['draft', 'submitted'].includes(exp.status)).reduce((sum, expense) => sum + convert(expense.amount, expense.currency, 'BDT'), 0);
 
-  const reimbursedExpenses = filteredExpenses.filter(exp => exp.status === 'reimbursed').reduce((sum, expense) => {
-    const amount = expense.currency === 'USD' ? expense.amount * 110 : expense.amount;
-    return sum + amount;
-  }, 0);
+  const reimbursedExpenses = filteredExpenses.filter(exp => exp.status === 'reimbursed').reduce((sum, expense) => sum + convert(expense.amount, expense.currency, 'BDT'), 0);
 
   return (
     <div className="space-y-6">
@@ -398,6 +331,21 @@ const ExpensesPage: React.FC = () => {
             title="Expenses Report"
             headers={['Date', 'Description', 'Category', 'Vendor', 'Amount', 'Status', 'Submitted By']}
           />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Columns3 className="w-4 h-4 mr-1" /> Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-popover border border-border">
+              {allColumns.filter(c => c !== 'actions').map(col => (
+                <DropdownMenuItem key={col} onClick={() => toggleColumn(col as ColumnKey)} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" readOnly checked={isColVisible(col as ColumnKey)} className="h-3 w-3" />
+                  <span className="capitalize text-xs">{col === 'submittedBy' ? 'Submitted By' : col}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button onClick={() => setIsCreateModalOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
             Add Expense
@@ -511,94 +459,111 @@ const ExpensesPage: React.FC = () => {
             <CardHeader>
               <CardTitle>Expense List</CardTitle>
               <CardDescription>
-                {filteredExpenses.length} expense{filteredExpenses.length !== 1 ? 's' : ''} found
+                {expensesQuery.isLoading ? 'Loading expenses...' : `${filteredExpenses.length} expense${filteredExpenses.length !== 1 ? 's' : ''} found`}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Vendor</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Submitted By</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-[120px]">Actions</TableHead>
+                    {isColVisible('date') && <TableHead>Date</TableHead>}
+                    {isColVisible('description') && <TableHead>Description</TableHead>}
+                    {isColVisible('category') && <TableHead>Category</TableHead>}
+                    {isColVisible('vendor') && <TableHead>Vendor</TableHead>}
+                    {isColVisible('amount') && <TableHead>Amount</TableHead>}
+                    {isColVisible('submittedBy') && <TableHead>Submitted By</TableHead>}
+                    {isColVisible('status') && <TableHead>Status</TableHead>}
+                    {isColVisible('actions') && <TableHead className="w-[120px]">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredExpenses.map((expense) => (
+                  {expensesQuery.isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={visibleCols.length} className="text-center text-sm text-muted-foreground">Loading...</TableCell>
+                    </TableRow>
+                  )}
+                  {!expensesQuery.isLoading && filteredExpenses.map((expense) => (
                     <TableRow key={expense.id}>
-                      <TableCell>{new Date(expense.date).toLocaleDateString()}</TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{expense.description}</div>
-                          {expense.project && (
-                            <div className="text-xs text-muted-foreground">Project: {expense.project}</div>
+                      {isColVisible('date') && <TableCell>{new Date(expense.date).toLocaleDateString()}</TableCell>}
+                      {isColVisible('description') && (
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{expense.description}</div>
+                            {expense.project && (
+                              <div className="text-xs text-muted-foreground">Project: {expense.project}</div>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                      {isColVisible('category') && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {getCategoryIcon(expense.category)}
+                            <span>{expense.category}</span>
+                          </div>
+                        </TableCell>
+                      )}
+                      {isColVisible('vendor') && <TableCell>{expense.vendor}</TableCell>}
+                      {isColVisible('amount') && (
+                        <TableCell className="font-mono">
+                          {formatCurrency(expense.amount, expense.currency)}
+                          {expense.billable && (
+                            <Badge variant="outline" className="ml-2 text-xs">Billable</Badge>
                           )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {getCategoryIcon(expense.category)}
-                          <span>{expense.category}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{expense.vendor}</TableCell>
-                      <TableCell className="font-mono">
-                        {formatCurrency(expense.amount, expense.currency)}
-                        {expense.billable && (
-                          <Badge variant="outline" className="ml-2 text-xs">Billable</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarFallback className="text-xs">
-                              {expense.submittedBy.name.split(' ').map(n => n[0]).join('')}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-sm">{expense.submittedBy.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColor(expense.status)}>
-                          {expense.status.replace('_', ' ')}
-                        </Badge>
-                      </TableCell>
-                       <TableCell>
+                        </TableCell>
+                      )}
+                      {isColVisible('submittedBy') && (
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-6 w-6">
+                              <AvatarFallback className="text-xs">
+                                {expense.submittedBy.name.split(' ').map(n => n[0]).join('')}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm">{expense.submittedBy.name}</span>
+                          </div>
+                        </TableCell>
+                      )}
+                      {isColVisible('status') && (
+                        <TableCell>
+                          <Badge className={getStatusClass(expense.status)}>
+                            {expense.status.replace('_', ' ')}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {isColVisible('actions') && (
+                        <TableCell>
                           <div className="flex gap-1">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              title="View Details" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="View Details"
                               onClick={() => handleViewExpense(expense)}
                             >
                               <Eye className="w-4 h-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              title="Edit" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Edit"
                               onClick={() => handleEditExpense(expense)}
                               disabled={isExporting}
                             >
                               <Edit className="w-4 h-4" />
                             </Button>
                             {expense.receipt && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                title="View Receipt" 
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="View Receipt"
                                 onClick={() => window.open(`/receipts/${expense.receipt}`, '_blank')}
                               >
                                 <Receipt className="w-4 h-4" />
                               </Button>
                             )}
                           </div>
-                       </TableCell>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>

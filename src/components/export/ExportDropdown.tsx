@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Download, FileText, File, Table } from 'lucide-react';
 import { ExportService, ExportFormat } from '@/services/exportService';
 
-interface ExportDropdownProps {
-  data: any[];
+interface ExportDropdownProps<Row extends Record<string, unknown> = Record<string, unknown>> {
+  data: Row[];
   filename: string;
   title: string;
   headers: string[];
@@ -18,14 +18,14 @@ interface ExportDropdownProps {
   size?: 'sm' | 'default' | 'lg';
 }
 
-export const ExportDropdown: React.FC<ExportDropdownProps> = ({
+export const ExportDropdown = <Row extends Record<string, unknown>>({
   data,
   filename,
   title,
   headers,
   variant = 'outline',
   size = 'sm'
-}) => {
+}: ExportDropdownProps<Row>) => {
   const handleExport = async (format: ExportFormat) => {
     await ExportService.exportData({
       filename,

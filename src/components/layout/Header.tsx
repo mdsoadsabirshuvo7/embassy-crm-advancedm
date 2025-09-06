@@ -4,12 +4,15 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Bell, Search, LogOut, Settings, User, Command } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTenant } from '@/contexts/TenantContext';
+import { ChevronsUpDown, Building2 } from 'lucide-react';
 import { GlobalSearch } from '@/components/search/GlobalSearch';
 import { useGlobalSearch } from '@/hooks/useGlobalSearch';
 import { SyncStatus } from '@/components/ui/sync-status';
 
 export const Header: React.FC = () => {
   const { user, logout } = useAuth();
+  const { organization, organizations, switchOrg, currentOrgId } = useTenant();
   const { isSearchOpen, setIsSearchOpen, openSearch } = useGlobalSearch();
 
   return (
@@ -32,6 +35,32 @@ export const Header: React.FC = () => {
           </div>
 
         <div className="flex items-center gap-4">
+          {/* Tenant Switcher */}
+          {organizations.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center gap-2 max-w-[200px] truncate">
+                  <Building2 className="w-4 h-4" />
+                  <span className="truncate text-sm">{organization?.name || 'Select Org'}</span>
+                  <ChevronsUpDown className="w-3 h-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64 max-h-72 overflow-auto">
+                <DropdownMenuLabel>Organizations</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {organizations.map(o => (
+                  <DropdownMenuItem 
+                    key={o.id} 
+                    onClick={() => switchOrg(o.id)}
+                    className={o.id === currentOrgId ? 'font-semibold' : ''}
+                  >
+                    {o.name}
+                    {o.id === currentOrgId && <span className="ml-auto text-xs text-primary">Active</span>}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <SyncStatus />
           
           <Button variant="ghost" size="sm" className="relative">
@@ -49,7 +78,7 @@ export const Header: React.FC = () => {
                 </Avatar>
                 <div className="text-left hidden md:block">
                   <div className="text-sm font-medium">{user?.name}</div>
-                  <div className="text-xs text-muted-foreground">{user?.role.replace('_', ' ')}</div>
+                  <div className="text-xs text-muted-foreground">{user?.role.replace('_', ' ')}{organization ? ` • ${organization.subdomain}` : ''}</div>
                 </div>
               </Button>
             </DropdownMenuTrigger>

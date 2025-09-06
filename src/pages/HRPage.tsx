@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,31 @@ import {
   TrendingUp,
   Trash
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+interface LeaveRequest {
+  id: string;
+  employee: string; // employee name for display (simplified for now)
+  employeeId?: string; // link back to employee record
+  type: string;
+  startDate: string; // ISO
+  endDate: string;   // ISO
+  days: number;
+  status: 'pending' | 'approved' | 'rejected';
+  reason: string;
+  createdAt: string;
+}
+
+const LEAVE_LS_KEY = 'hr_leave_requests_v1';
+
+// Seed data moved outside component to avoid re-creation for hooks dependency warnings
+const seedLeave: LeaveRequest[] = [
+  { id: 'LR001', employee: 'Sarah Ahmed', employeeId: 'emp-1', type: 'Annual Leave', startDate: '2024-02-15', endDate: '2024-02-20', days: 5, status: 'pending', reason: 'Family vacation', createdAt: new Date().toISOString() },
+  { id: 'LR002', employee: 'Mohammed Khan', employeeId: 'emp-2', type: 'Sick Leave', startDate: '2024-01-22', endDate: '2024-01-24', days: 3, status: 'approved', reason: 'Medical treatment', createdAt: new Date().toISOString() },
+  { id: 'LR003', employee: 'Fatima Rahman', employeeId: 'emp-3', type: 'Personal Leave', startDate: '2024-02-10', endDate: '2024-02-12', days: 2, status: 'rejected', reason: 'Personal matters', createdAt: new Date().toISOString() }
+];
 
 const HRPage: React.FC = () => {
   const { employees, addEmployee, updateEmployee, deleteEmployee } = useData();
@@ -72,38 +97,77 @@ const HRPage: React.FC = () => {
     }
   ];
 
-  const mockLeaveRequests = [
-    {
-      id: 'LR001',
-      employee: 'Sarah Ahmed',
-      type: 'Annual Leave',
-      startDate: '2024-02-15',
-      endDate: '2024-02-20',
-      days: 5,
-      status: 'pending',
-      reason: 'Family vacation'
-    },
-    {
-      id: 'LR002',
-      employee: 'Mohammed Khan',
-      type: 'Sick Leave',
-      startDate: '2024-01-22',
-      endDate: '2024-01-24',
-      days: 3,
-      status: 'approved',
-      reason: 'Medical treatment'
-    },
-    {
-      id: 'LR003',
-      employee: 'Fatima Rahman',
-      type: 'Personal Leave',
-      startDate: '2024-02-10',
-      endDate: '2024-02-12',
-      days: 2,
-      status: 'rejected',
-      reason: 'Personal matters'
+  // Leave management state
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [leaveEmployeeId, setLeaveEmployeeId] = useState('');
+  const [leaveType, setLeaveType] = useState('Annual Leave');
+  const [leaveStart, setLeaveStart] = useState('');
+  const [leaveEnd, setLeaveEnd] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+
+  // Load existing leave requests from localStorage
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LEAVE_LS_KEY);
+      if (raw) {
+        setLeaveRequests(JSON.parse(raw));
+      } else {
+        setLeaveRequests(seedLeave);
+      }
+    } catch {
+      setLeaveRequests(seedLeave);
     }
-  ];
+  }, []);
+
+  // Persist leave requests
+  useEffect(() => {
+    try { localStorage.setItem(LEAVE_LS_KEY, JSON.stringify(leaveRequests)); } catch { /* ignore */ }
+  }, [leaveRequests]);
+
+  const resetLeaveForm = () => {
+    setLeaveEmployeeId('');
+    setLeaveType('Annual Leave');
+    setLeaveStart('');
+    setLeaveEnd('');
+    setLeaveReason('');
+    setSubmittingLeave(false);
+  };
+
+  const calculateDays = (start: string, end: string) => {
+    if (!start || !end) return 0;
+    const s = new Date(start).getTime();
+    const e = new Date(end).getTime();
+    if (isNaN(s) || isNaN(e) || e < s) return 0;
+    // inclusive days
+    return Math.floor((e - s) / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const handleSubmitLeave = () => {
+    if (!leaveEmployeeId || !leaveStart || !leaveEnd) return;
+    setSubmittingLeave(true);
+    const emp = employees.find(e => e.id === leaveEmployeeId) || employees[0];
+    const days = calculateDays(leaveStart, leaveEnd);
+    const newReq: LeaveRequest = {
+      id: `LR${Date.now()}`,
+      employee: emp?.userId || emp?.employeeId || 'Unknown',
+      employeeId: emp?.id,
+      type: leaveType,
+      startDate: leaveStart,
+      endDate: leaveEnd,
+      days,
+      status: 'pending',
+      reason: leaveReason.trim(),
+      createdAt: new Date().toISOString()
+    };
+    setLeaveRequests(prev => [newReq, ...prev]);
+    setIsLeaveModalOpen(false);
+    resetLeaveForm();
+  };
+
+  const approveLeave = (id: string) => setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' } : r));
+  const rejectLeave = (id: string) => setLeaveRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'rejected' } : r));
 
   const currentPayrollData = payrollData.length > 0 ? payrollData : mockPayrollData;
 
@@ -134,8 +198,8 @@ const HRPage: React.FC = () => {
   const stats = {
     totalEmployees: employees.length,
     activeEmployees: employees.filter(e => e.status === 'active').length,
-    onLeave: employees.filter(e => e.status === 'inactive').length, // Using inactive as on leave for demo
-    pendingRequests: mockLeaveRequests.filter(r => r.status === 'pending').length
+    onLeave: employees.filter(e => e.status === 'inactive').length, // placeholder mapping
+    pendingRequests: leaveRequests.filter(r => r.status === 'pending').length
   };
 
   const oldPayrollData = [
@@ -480,7 +544,7 @@ const HRPage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="departments" className="space-y-6">
-          <DepartmentManagement employees={employees} />
+          <DepartmentManagement employees={employees.map(e => ({ id: e.id, name: e.userId || e.employeeId || 'Unknown' }))} />
         </TabsContent>
 
         <TabsContent value="leave" className="space-y-6">
@@ -493,7 +557,7 @@ const HRPage: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <ExportDropdown
-                    data={mockLeaveRequests.map(req => ({
+                    data={leaveRequests.map(req => ({
                       'Request ID': req.id,
                       'Employee': req.employee,
                       'Type': req.type,
@@ -507,7 +571,7 @@ const HRPage: React.FC = () => {
                     title="Leave Requests Report"
                     headers={['Request ID', 'Employee', 'Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason']}
                   />
-                  <Button size="sm">
+                  <Button size="sm" onClick={() => setIsLeaveModalOpen(true)}>
                     <Plus className="w-4 h-4 mr-2" />
                     New Request
                   </Button>
@@ -529,7 +593,7 @@ const HRPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
               <TableBody>
-                {mockLeaveRequests.map((request) => (
+                {leaveRequests.map((request) => (
                     <TableRow key={request.id}>
                       <TableCell className="font-mono">{request.id}</TableCell>
                       <TableCell className="font-medium">{request.employee}</TableCell>
@@ -550,16 +614,16 @@ const HRPage: React.FC = () => {
                            <Button variant="ghost" size="sm" onClick={() => console.log('View leave request', request.id)}>
                              <Eye className="w-4 h-4" />
                            </Button>
-                           {request.status === 'pending' && (
-                             <>
-                               <Button variant="ghost" size="sm" className="text-success" onClick={() => console.log('Approve request', request.id)}>
-                                 <CheckCircle className="w-4 h-4" />
-                               </Button>
-                               <Button variant="ghost" size="sm" className="text-destructive" onClick={() => console.log('Reject request', request.id)}>
-                                 <XCircle className="w-4 h-4" />
-                               </Button>
-                             </>
-                           )}
+                            {request.status === 'pending' && (
+                              <>
+                                <Button variant="ghost" size="sm" className="text-success" onClick={() => approveLeave(request.id)}>
+                                  <CheckCircle className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="sm" className="text-destructive" onClick={() => rejectLeave(request.id)}>
+                                  <XCircle className="w-4 h-4" />
+                                </Button>
+                              </>
+                            )}
                          </div>
                        </TableCell>
                     </TableRow>
@@ -722,6 +786,71 @@ const HRPage: React.FC = () => {
         onClose={() => setIsPayrollFormOpen(false)}
         onSubmit={handleAddPayroll}
       />
+
+      {/* Leave Request Modal */}
+      <Dialog open={isLeaveModalOpen} onOpenChange={(o) => { if (!o) { setIsLeaveModalOpen(false); resetLeaveForm(); } else setIsLeaveModalOpen(true);} }>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Leave Request</DialogTitle>
+            <DialogDescription>Create a leave request for an employee</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Employee</Label>
+              <Select value={leaveEmployeeId} onValueChange={setLeaveEmployeeId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select employee" />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.userId || emp.employeeId}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Start Date</Label>
+                <Input type="date" value={leaveStart} onChange={(e) => setLeaveStart(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>End Date</Label>
+                <Input type="date" value={leaveEnd} onChange={(e) => setLeaveEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Leave Type</Label>
+                <Select value={leaveType} onValueChange={setLeaveType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Annual Leave">Annual Leave</SelectItem>
+                    <SelectItem value="Sick Leave">Sick Leave</SelectItem>
+                    <SelectItem value="Personal Leave">Personal Leave</SelectItem>
+                    <SelectItem value="Emergency Leave">Emergency Leave</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Days</Label>
+                <Input value={calculateDays(leaveStart, leaveEnd) || ''} readOnly placeholder="0" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Textarea rows={3} value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} placeholder="Reason for leave" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsLeaveModalOpen(false); resetLeaveForm(); }}>Cancel</Button>
+            <Button disabled={!leaveEmployeeId || !leaveStart || !leaveEnd || calculateDays(leaveStart, leaveEnd) <= 0 || submittingLeave} onClick={handleSubmitLeave}>
+              {submittingLeave ? 'Submitting...' : 'Submit Request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

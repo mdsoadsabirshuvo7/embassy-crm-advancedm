@@ -1,4 +1,13 @@
 // Offline-First Storage System using IndexedDB
+interface SyncQueueItem<T = unknown> {
+  id?: number;
+  storeName: string;
+  operation: 'PUT' | 'DELETE';
+  data: T;
+  timestamp: number;
+  synced: boolean;
+}
+
 class OfflineStorageManager {
   private dbName = 'EmbassyCRM';
   private version = 1;
@@ -42,7 +51,7 @@ class OfflineStorageManager {
     });
   }
 
-  async store(storeName: string, data: any): Promise<void> {
+  async store<T extends { id?: string | number }>(storeName: string, data: T): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
 
     return new Promise((resolve, reject) => {
@@ -59,7 +68,7 @@ class OfflineStorageManager {
     });
   }
 
-  async get(storeName: string, id: string): Promise<any> {
+  async get<T = unknown>(storeName: string, id: string): Promise<T | undefined> {
     if (!this.db) throw new Error('Database not initialized');
 
     return new Promise((resolve, reject) => {
@@ -72,7 +81,7 @@ class OfflineStorageManager {
     });
   }
 
-  async getAll(storeName: string): Promise<any[]> {
+  async getAll<T = unknown>(storeName: string): Promise<T[]> {
     if (!this.db) throw new Error('Database not initialized');
 
     return new Promise((resolve, reject) => {
@@ -101,7 +110,7 @@ class OfflineStorageManager {
     });
   }
 
-  private async addToSyncQueue(storeName: string, operation: string, data: any): Promise<void> {
+  private async addToSyncQueue<T>(storeName: string, operation: SyncQueueItem['operation'], data: T): Promise<void> {
     if (!this.db) return;
 
     const transaction = this.db.transaction(['sync_queue'], 'readwrite');
@@ -132,7 +141,7 @@ class OfflineStorageManager {
     }
   }
 
-  private async getPendingSyncItems(): Promise<any[]> {
+  private async getPendingSyncItems(): Promise<SyncQueueItem[]> {
     if (!this.db) return [];
 
     return new Promise((resolve, reject) => {
@@ -148,7 +157,7 @@ class OfflineStorageManager {
     });
   }
 
-  private async syncItem(item: any): Promise<void> {
+  private async syncItem(item: SyncQueueItem): Promise<void> {
     // Implement sync logic with Firebase
     console.log('Syncing item:', item);
     // This would integrate with your existing Firebase services

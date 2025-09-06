@@ -3,25 +3,102 @@ import { Expense } from '../types/expense';
 
 export class LocalStorageService {
   private static readonly KEYS = {
-    CLIENTS: 'crm_clients',
-    ACCOUNTS: 'crm_accounts',
-    TRANSACTIONS: 'crm_transactions',
-    INVOICES: 'crm_invoices',
-    EMPLOYEES: 'crm_employees',
-    PAYROLL: 'crm_payroll',
-    DOCUMENTS: 'crm_documents',
-    TASKS: 'crm_tasks',
-    ATTENDANCE: 'crm_attendance',
-    LEAVE_REQUESTS: 'crm_leave_requests',
-    NOTIFICATIONS: 'crm_notifications',
-    EXPENSES: 'crm_expenses',
-    LAST_SYNC: 'crm_last_sync'
+  CLIENTS: 'crm_clients',
+  ACCOUNTS: 'crm_accounts',
+  TRANSACTIONS: 'crm_transactions',
+  INVOICES: 'crm_invoices',
+  EMPLOYEES: 'crm_employees',
+  PAYROLL: 'crm_payroll',
+  DOCUMENTS: 'crm_documents',
+  TASKS: 'crm_tasks',
+  ATTENDANCE: 'crm_attendance',
+  LEAVE_REQUESTS: 'crm_leave_requests',
+  NOTIFICATIONS: 'crm_notifications',
+  EXPENSES: 'crm_expenses',
+  LAST_SYNC: 'crm_last_sync'
   };
 
+  // Schema versioning
+  private static readonly SCHEMA_VERSION_KEY = 'crm_schema_version';
+  private static readonly CURRENT_VERSION = 2; // Increment when structure changes
+
+  private static getStoredVersion(): number {
+    const v = localStorage.getItem(this.SCHEMA_VERSION_KEY);
+    return v ? parseInt(v, 10) : 0;
+  }
+
+  private static setStoredVersion(v: number) {
+    localStorage.setItem(this.SCHEMA_VERSION_KEY, String(v));
+  }
+
+  static runMigrationsInternal(): void {
+    const from = this.getStoredVersion();
+    if (from >= this.CURRENT_VERSION) return; // Up to date
+
+    // Simple linear migrations; each case upgrades one version
+    for (let v = from + 1; v <= this.CURRENT_VERSION; v++) {
+      try {
+        switch (v) {
+          case 1:
+            // Initial baseline (no-op)
+            break;
+          case 2: {
+            // Ensure expenses array exists & normalize date string fields
+            const expenses = this.getExpenses();
+            const normalized = expenses.map(e => ({
+              ...e,
+              date: typeof e.date === 'string' ? e.date : new Date(e.date as unknown as string).toISOString().split('T')[0]
+            }));
+            this.saveExpenses(normalized);
+            break;
+          }
+          default:
+            break;
+        }
+        this.setStoredVersion(v);
+      } catch (err) {
+        console.error('Migration failed for version', v, err);
+        break; // Stop further migrations to prevent cascading issues
+      }
+    }
+  }
+
   // Generic methods
-  private static get<T>(key: string): T[] {
+  private static tenantKey(base: string, orgId?: string | null) {
+    return orgId ? `${base}__org__${orgId}` : base;
+  }
+
+  private static activeOrg(): string | null {
+    try { return localStorage.getItem('activeOrgId'); } catch { return null; }
+  }
+
+  private static migrateIfNeeded(baseKey: string) {
+    // If namespaced key missing but base key exists, perform one-time migration splitting by orgId.
+    const orgId = this.activeOrg();
+    if (!orgId) return; // nothing to do without active org
+    const namespaced = this.tenantKey(baseKey, orgId);
+    if (localStorage.getItem(namespaced)) return; // already migrated for this org
+    const legacyRaw = localStorage.getItem(baseKey);
+    if (!legacyRaw) return;
     try {
-      const data = localStorage.getItem(key);
+      const arr: unknown = JSON.parse(legacyRaw);
+      if (Array.isArray(arr)) {
+        const filtered = arr.filter((item: unknown) => {
+          if (!item || typeof item !== 'object') return true;
+          const rec = item as { orgId?: string };
+          return !rec.orgId || rec.orgId === orgId;
+        });
+        localStorage.setItem(namespaced, JSON.stringify(filtered));
+      }
+    // Do not delete legacy to allow other org migrations later
+    } catch { /* ignore */ }
+  }
+
+  private static get<T>(key: string, orgScoped = true): T[] {
+    try {
+      const orgId = this.activeOrg();
+      if (orgScoped) this.migrateIfNeeded(key);
+      const data = localStorage.getItem(orgScoped ? this.tenantKey(key, orgId) : key);
       return data ? JSON.parse(data) : [];
     } catch (error) {
       console.error(`Error getting ${key} from localStorage:`, error);
@@ -29,9 +106,10 @@ export class LocalStorageService {
     }
   }
 
-  private static set<T>(key: string, data: T[]): void {
+  private static set<T>(key: string, data: T[], orgScoped = true): void {
     try {
-      localStorage.setItem(key, JSON.stringify(data));
+      const orgId = this.activeOrg();
+      localStorage.setItem(orgScoped ? this.tenantKey(key, orgId) : key, JSON.stringify(data));
       localStorage.setItem(this.KEYS.LAST_SYNC, new Date().toISOString());
     } catch (error) {
       console.error(`Error setting ${key} in localStorage:`, error);
@@ -44,7 +122,7 @@ export class LocalStorageService {
 
   // Client methods
   static getClients(): Client[] {
-    return this.get<Client>(this.KEYS.CLIENTS);
+    return this.get<Client>(this.KEYS.CLIENTS).filter(c => !c.orgId || c.orgId === this.activeOrg());
   }
 
   static saveClients(clients: Client[]): void {
@@ -52,13 +130,14 @@ export class LocalStorageService {
   }
 
   static addClient(clientData: Omit<Client, 'id' | 'createdAt' | 'updatedAt'>): Client {
-    const clients = this.getClients();
+  const clients = this.getClients();
     const newClient: Client = {
       ...clientData,
       id: this.generateId('client'),
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newClient.orgId) (newClient as Client).orgId = this.activeOrg() || 'global';
     clients.push(newClient);
     this.saveClients(clients);
     return newClient;
@@ -80,7 +159,7 @@ export class LocalStorageService {
 
   // Invoice methods
   static getInvoices(): Invoice[] {
-    return this.get<Invoice>(this.KEYS.INVOICES);
+    return this.get<Invoice>(this.KEYS.INVOICES).filter(i => !i.orgId || i.orgId === this.activeOrg());
   }
 
   static saveInvoices(invoices: Invoice[]): void {
@@ -95,6 +174,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newInvoice.orgId) (newInvoice as Invoice).orgId = this.activeOrg() || 'global';
     invoices.push(newInvoice);
     this.saveInvoices(invoices);
     return newInvoice;
@@ -116,7 +196,7 @@ export class LocalStorageService {
 
   // Task methods
   static getTasks(): Task[] {
-    return this.get<Task>(this.KEYS.TASKS);
+    return this.get<Task>(this.KEYS.TASKS).filter(t => !t.orgId || t.orgId === this.activeOrg());
   }
 
   static saveTasks(tasks: Task[]): void {
@@ -131,6 +211,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newTask.orgId) (newTask as Task).orgId = this.activeOrg() || 'global';
     tasks.push(newTask);
     this.saveTasks(tasks);
     return newTask;
@@ -152,7 +233,7 @@ export class LocalStorageService {
 
   // Employee methods
   static getEmployees(): Employee[] {
-    return this.get<Employee>(this.KEYS.EMPLOYEES);
+    return this.get<Employee>(this.KEYS.EMPLOYEES).filter(e => !e.orgId || e.orgId === this.activeOrg());
   }
 
   static saveEmployees(employees: Employee[]): void {
@@ -167,6 +248,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newEmployee.orgId) (newEmployee as Employee).orgId = this.activeOrg() || 'global';
     employees.push(newEmployee);
     this.saveEmployees(employees);
     return newEmployee;
@@ -188,7 +270,7 @@ export class LocalStorageService {
 
   // Document methods
   static getDocuments(): Document[] {
-    return this.get<Document>(this.KEYS.DOCUMENTS);
+    return this.get<Document>(this.KEYS.DOCUMENTS).filter(d => !d.orgId || d.orgId === this.activeOrg());
   }
 
   static saveDocuments(documents: Document[]): void {
@@ -203,6 +285,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newDocument.orgId) (newDocument as Document).orgId = this.activeOrg() || 'global';
     documents.push(newDocument);
     this.saveDocuments(documents);
     return newDocument;
@@ -224,7 +307,7 @@ export class LocalStorageService {
 
   // Expense methods
   static getExpenses(): Expense[] {
-    return this.get<Expense>(this.KEYS.EXPENSES);
+    return this.get<Expense>(this.KEYS.EXPENSES).filter(e => !e.orgId || e.orgId === this.activeOrg());
   }
 
   static saveExpenses(expenses: Expense[]): void {
@@ -239,6 +322,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newExpense.orgId) (newExpense as Expense).orgId = this.activeOrg() || 'global';
     expenses.push(newExpense);
     this.saveExpenses(expenses);
     return newExpense;
@@ -260,7 +344,7 @@ export class LocalStorageService {
 
   // Account methods
   static getAccounts(): Account[] {
-    return this.get<Account>(this.KEYS.ACCOUNTS);
+    return this.get<Account>(this.KEYS.ACCOUNTS).filter(a => !a.orgId || a.orgId === this.activeOrg());
   }
 
   static saveAccounts(accounts: Account[]): void {
@@ -275,6 +359,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newAccount.orgId) (newAccount as Account).orgId = this.activeOrg() || 'global';
     accounts.push(newAccount);
     this.saveAccounts(accounts);
     return newAccount;
@@ -291,7 +376,7 @@ export class LocalStorageService {
 
   // Transaction methods
   static getTransactions(): Transaction[] {
-    return this.get<Transaction>(this.KEYS.TRANSACTIONS);
+    return this.get<Transaction>(this.KEYS.TRANSACTIONS).filter(tx => !tx.orgId || tx.orgId === this.activeOrg());
   }
 
   static saveTransactions(transactions: Transaction[]): void {
@@ -306,6 +391,7 @@ export class LocalStorageService {
       createdAt: new Date(),
       updatedAt: new Date()
     };
+  if (!newTransaction.orgId) (newTransaction as Transaction).orgId = this.activeOrg() || 'global';
     transactions.push(newTransaction);
     this.saveTransactions(transactions);
     return newTransaction;
@@ -338,7 +424,7 @@ export class LocalStorageService {
   }
 
   // Export all data
-  static exportAllData(): any {
+  static exportAllData() {
     return {
       clients: this.getClients(),
       invoices: this.getInvoices(),
@@ -349,21 +435,25 @@ export class LocalStorageService {
       accounts: this.getAccounts(),
       transactions: this.getTransactions(),
       exportedAt: new Date().toISOString()
-    };
+    } as const;
   }
 
   // Import data
-  static importData(data: any): void {
-    if (data.clients) this.saveClients(data.clients);
-    if (data.invoices) this.saveInvoices(data.invoices);
-    if (data.tasks) this.saveTasks(data.tasks);
-    if (data.employees) this.saveEmployees(data.employees);
-    if (data.documents) this.saveDocuments(data.documents);
-    if (data.expenses) this.saveExpenses(data.expenses);
-    if (data.accounts) this.saveAccounts(data.accounts);
-    if (data.transactions) this.saveTransactions(data.transactions);
+  static importData(data: { clients?: unknown; invoices?: unknown; tasks?: unknown; employees?: unknown; documents?: unknown; expenses?: unknown; accounts?: unknown; transactions?: unknown; }): void {
+    if (Array.isArray(data.clients)) this.saveClients(data.clients as Client[]);
+    if (Array.isArray(data.invoices)) this.saveInvoices(data.invoices as Invoice[]);
+    if (Array.isArray(data.tasks)) this.saveTasks(data.tasks as Task[]);
+    if (Array.isArray(data.employees)) this.saveEmployees(data.employees as Employee[]);
+    if (Array.isArray(data.documents)) this.saveDocuments(data.documents as Document[]);
+    if (Array.isArray(data.expenses)) this.saveExpenses(data.expenses as Expense[]);
+    if (Array.isArray(data.accounts)) this.saveAccounts(data.accounts as Account[]);
+    if (Array.isArray(data.transactions)) this.saveTransactions(data.transactions as Transaction[]);
   }
 }
 
 // Initialize with demo data on first load
 LocalStorageService.initializeWithDemoData();
+// Run migrations after potential demo init
+// Public migration trigger (idempotent)
+export const migrateLocalStorageSchema = () => LocalStorageService.runMigrationsInternal();
+migrateLocalStorageSchema();

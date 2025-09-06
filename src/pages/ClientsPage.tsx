@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +28,9 @@ import { useData } from '@/contexts/DataContext';
 import { Client } from '@/types/database';
 import { ClientForm } from '@/components/client/ClientForm';
 import { ClientDocuments } from '@/components/client/ClientDocuments';
+// Lazy load heavy export UI only when needed
+// (merged React import above)
+const ExportDropdown = lazy(() => import('@/components/export/ExportDropdown').then(m => ({ default: m.ExportDropdown })));
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -199,6 +202,14 @@ export const ClientsPage: React.FC = () => {
           <Plus className="w-4 h-4" />
           Add New Client
         </Button>
+        <Suspense fallback={<div className="text-sm text-muted-foreground">Loading export...</div>}>
+          <ExportDropdown
+            data={filteredClients}
+            filename="clients"
+            title="Client List"
+            headers={[ 'Name','Email','Phone','Company','Nationality','Status','Assigned To' ]}
+          />
+        </Suspense>
       </div>
 
       {/* Statistics Cards */}

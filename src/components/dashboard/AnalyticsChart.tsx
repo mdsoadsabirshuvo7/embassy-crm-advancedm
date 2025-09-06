@@ -17,13 +17,26 @@ import {
   Legend
 } from 'recharts';
 
-interface AnalyticsChartProps {
-  type: 'revenue' | 'clients' | 'tasks' | 'documents';
+type RevenuePoint = { name: string; value: number };
+type ClientBarPoint = { name: string; active: number; pending: number; inactive: number };
+type TaskSlice = { name: string; value: number };
+type DocumentPoint = { name: string; value: number };
+
+type AnalyticsType = 'revenue' | 'clients' | 'tasks' | 'documents';
+
+interface BaseProps<TType extends AnalyticsType, TData> {
+  type: TType;
   title: string;
   description?: string;
-  data: any[];
+  data: TData[];
   timeRange?: string;
 }
+
+type AnalyticsChartProps =
+  | BaseProps<'revenue', RevenuePoint>
+  | BaseProps<'clients', ClientBarPoint>
+  | BaseProps<'tasks', TaskSlice>
+  | BaseProps<'documents', DocumentPoint>;
 
 const COLORS = {
   primary: 'hsl(var(--primary))',

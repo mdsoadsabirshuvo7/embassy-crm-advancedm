@@ -15,6 +15,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Expense } from '@/types/expense';
+import { getStatusClass } from '@/utils/statusClasses';
 
 interface ExpenseViewModalProps {
   isOpen: boolean;
@@ -34,16 +35,7 @@ export const ExpenseViewModal: React.FC<ExpenseViewModalProps> = ({
     return `${symbol}${amount.toLocaleString()}`;
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'approved': return 'bg-success text-success-foreground';
-      case 'reimbursed': return 'bg-primary text-primary-foreground';
-      case 'submitted': return 'bg-warning text-warning-foreground';
-      case 'draft': return 'bg-muted text-muted-foreground';
-      case 'rejected': return 'bg-destructive text-destructive-foreground';
-      default: return 'bg-secondary text-secondary-foreground';
-    }
-  };
+  // Status classes centralized
 
   const getPaymentMethodLabel = (method: string) => {
     switch (method) {
@@ -89,7 +81,7 @@ export const ExpenseViewModal: React.FC<ExpenseViewModalProps> = ({
                 </div>
                 <div>
                   <h4 className="font-semibold text-sm text-muted-foreground">Status</h4>
-                  <Badge className={getStatusColor(expense.status)}>
+                  <Badge className={getStatusClass(expense.status)}>
                     {expense.status.replace('_', ' ')}
                   </Badge>
                 </div>

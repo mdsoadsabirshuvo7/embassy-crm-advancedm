@@ -29,7 +29,8 @@ import { ExportService } from '@/services/exportService';
 
 const AccountingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [accounts, setAccounts] = useState<any[]>([]);
+  interface AccountSummary { id: string; name: string; type: string; balance: string; status: string }
+  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isTxnOpen, setIsTxnOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
@@ -45,7 +46,14 @@ const AccountingPage: React.FC = () => {
       
       try {
         const accountsData = await AccountingService.getAccountsByOrganization(organization.id);
-        setAccounts(accountsData);
+        // Map service accounts to summary (adding status if absent)
+        setAccounts(accountsData.map(a => ({
+          id: a.id,
+            name: a.name,
+            type: a.type,
+            balance: typeof a.balance === 'number' ? a.balance.toFixed(2) : String(a.balance),
+            status: (a as { status?: string }).status || 'active'
+        })));
       } catch (error) {
         console.error('Error loading accounting data:', error);
       } finally {
@@ -156,105 +164,63 @@ const AccountingPage: React.FC = () => {
       const startDate = new Date();
       startDate.setMonth(startDate.getMonth() - 1); // Last month
       
-      let reportData: any = {};
+  let reportData: { title: string; period?: string; asOf?: string; organization: string; data: (string)[][] } = { title: '', organization: organization.name, data: [] };
       let filename = '';
       let headers: string[] = [];
-      let rows: any[] = [];
+  let rows: string[][] = [];
       
       switch (reportType) {
-        case 'profit-loss':
+        case 'profit-loss': {
           const plReport = await AccountingService.generateProfitAndLoss(organization.id, startDate, endDate);
           filename = `profit-loss-${new Date().toISOString().split('T')[0]}`;
           headers = ['Account', 'Amount'];
-          
-          // Add revenue rows
           rows.push(['REVENUE', '']);
-          plReport.revenue.forEach(item => {
-            rows.push([item.account.name, item.amount.toFixed(2)]);
-          });
+          plReport.revenue.forEach(item => rows.push([item.account.name, item.amount.toFixed(2)]));
           rows.push(['Total Revenue', plReport.totalRevenue.toFixed(2)]);
           rows.push(['', '']);
-          
-          // Add expense rows
           rows.push(['EXPENSES', '']);
-          plReport.expenses.forEach(item => {
-            rows.push([item.account.name, item.amount.toFixed(2)]);
-          });
+          plReport.expenses.forEach(item => rows.push([item.account.name, item.amount.toFixed(2)]));
           rows.push(['Total Expenses', plReport.totalExpenses.toFixed(2)]);
           rows.push(['', '']);
           rows.push(['NET INCOME', plReport.netIncome.toFixed(2)]);
-          
-          reportData = {
-            title: 'Profit & Loss Statement',
-            period: `${startDate.toDateString()} to ${endDate.toDateString()}`,
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Profit & Loss Statement', period: `${startDate.toDateString()} to ${endDate.toDateString()}`, organization: organization.name, data: rows };
           break;
-          
-        case 'balance-sheet':
+        }
+        case 'balance-sheet': {
           const bsReport = await AccountingService.generateBalanceSheet(organization.id, endDate);
           filename = `balance-sheet-${new Date().toISOString().split('T')[0]}`;
           headers = ['Account', 'Amount'];
-          
-          // Add assets
           rows.push(['ASSETS', '']);
-          bsReport.assets.forEach(item => {
-            rows.push([item.account.name, item.amount.toFixed(2)]);
-          });
+            bsReport.assets.forEach(item => rows.push([item.account.name, item.amount.toFixed(2)]));
           rows.push(['Total Assets', bsReport.totalAssets.toFixed(2)]);
           rows.push(['', '']);
-          
-          // Add liabilities
           rows.push(['LIABILITIES', '']);
-          bsReport.liabilities.forEach(item => {
-            rows.push([item.account.name, item.amount.toFixed(2)]);
-          });
+            bsReport.liabilities.forEach(item => rows.push([item.account.name, item.amount.toFixed(2)]));
           rows.push(['Total Liabilities', bsReport.totalLiabilities.toFixed(2)]);
           rows.push(['', '']);
-          
-          // Add equity
           rows.push(['EQUITY', '']);
-          bsReport.equity.forEach(item => {
-            rows.push([item.account.name, item.amount.toFixed(2)]);
-          });
+            bsReport.equity.forEach(item => rows.push([item.account.name, item.amount.toFixed(2)]));
           rows.push(['Total Equity', bsReport.totalEquity.toFixed(2)]);
-          
-          reportData = {
-            title: 'Balance Sheet',
-            asOf: endDate.toDateString(),
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Balance Sheet', asOf: endDate.toDateString(), organization: organization.name, data: rows };
           break;
-          
-        case 'trial-balance':
+        }
+        case 'trial-balance': {
           const tbReport = await AccountingService.generateTrialBalance(organization.id, endDate);
           filename = `trial-balance-${new Date().toISOString().split('T')[0]}`;
           headers = ['Account Code', 'Account Name', 'Debit', 'Credit', 'Balance'];
-          
-          tbReport.accounts.forEach(item => {
-            rows.push([
-              item.account.code || item.account.id,
-              item.account.name,
-              item.debit.toFixed(2),
-              item.credit.toFixed(2),
-              item.balance.toFixed(2)
-            ]);
-          });
-          
+          tbReport.accounts.forEach(item => rows.push([
+            item.account.code || item.account.id,
+            item.account.name,
+            item.debit.toFixed(2),
+            item.credit.toFixed(2),
+            item.balance.toFixed(2)
+          ]));
           rows.push(['', '', '', '', '']);
           rows.push(['TOTALS', '', tbReport.totalDebits.toFixed(2), tbReport.totalCredits.toFixed(2), '']);
-          
-          reportData = {
-            title: 'Trial Balance',
-            asOf: endDate.toDateString(),
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Trial Balance', asOf: endDate.toDateString(), organization: organization.name, data: rows };
           break;
-          
-        case 'cash-flow':
+        }
+        case 'cash-flow': {
           filename = `cash-flow-${new Date().toISOString().split('T')[0]}`;
           headers = ['Category', 'Amount'];
           rows = [
@@ -263,16 +229,10 @@ const AccountingPage: React.FC = () => {
             ['Financing Activities', '10,000.00'],
             ['Net Cash Flow', '20,000.00']
           ];
-          
-          reportData = {
-            title: 'Cash Flow Statement',
-            period: `${startDate.toDateString()} to ${endDate.toDateString()}`,
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Cash Flow Statement', period: `${startDate.toDateString()} to ${endDate.toDateString()}`, organization: organization.name, data: rows };
           break;
-          
-        case 'aged-receivables':
+        }
+        case 'aged-receivables': {
           filename = `aged-receivables-${new Date().toISOString().split('T')[0]}`;
           headers = ['Customer', 'Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days', 'Total'];
           rows = [
@@ -281,16 +241,10 @@ const AccountingPage: React.FC = () => {
             ['John Smith', '0.00', '0.00', '3,200.00', '0.00', '0.00', '3,200.00'],
             ['TOTALS', '1,800.00', '2,500.00', '3,200.00', '0.00', '0.00', '7,500.00']
           ];
-          
-          reportData = {
-            title: 'Aged Receivables Report',
-            asOf: endDate.toDateString(),
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Aged Receivables Report', asOf: endDate.toDateString(), organization: organization.name, data: rows };
           break;
-          
-        case 'aged-payables':
+        }
+        case 'aged-payables': {
           filename = `aged-payables-${new Date().toISOString().split('T')[0]}`;
           headers = ['Vendor', 'Current', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days', 'Total'];
           rows = [
@@ -298,14 +252,9 @@ const AccountingPage: React.FC = () => {
             ['Utility Company', '300.00', '150.00', '0.00', '0.00', '0.00', '450.00'],
             ['TOTALS', '800.00', '150.00', '0.00', '0.00', '0.00', '950.00']
           ];
-          
-          reportData = {
-            title: 'Aged Payables Report',
-            asOf: endDate.toDateString(),
-            organization: organization.name,
-            data: rows
-          };
+          reportData = { title: 'Aged Payables Report', asOf: endDate.toDateString(), organization: organization.name, data: rows };
           break;
+        }
       }
       
       // Export based on format
@@ -313,13 +262,10 @@ const AccountingPage: React.FC = () => {
         filename: filename,
         title: reportData.title,
         headers: headers,
-        data: rows.map(row => {
-          const obj: any = {};
-          headers.forEach((header, index) => {
-            obj[header] = row[index] || '';
-          });
-          return obj;
-        }),
+        data: rows.map(row => headers.reduce<Record<string,string>>((acc, header, index) => {
+          acc[header] = row[index] || '';
+          return acc;
+        }, {})),
         format: format as 'pdf' | 'excel' | 'csv'
       };
 

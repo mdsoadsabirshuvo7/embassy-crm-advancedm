@@ -89,14 +89,10 @@ export const validateAndSanitizeData = <T>(
   try {
     // Sanitize string fields if data is an object
     if (typeof data === 'object' && data !== null) {
-      const sanitizedData = Object.entries(data).reduce((acc, [key, value]) => {
-        if (typeof value === 'string') {
-          acc[key] = sanitizeInput(value);
-        } else {
-          acc[key] = value;
-        }
+      const sanitizedData = Object.entries(data as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [key, value]) => {
+        acc[key] = typeof value === 'string' ? sanitizeInput(value) : value;
         return acc;
-      }, {} as any);
+      }, {});
       
       const result = schema.parse(sanitizedData);
       return { success: true, data: result };

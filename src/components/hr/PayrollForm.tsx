@@ -88,7 +88,10 @@ export const PayrollForm: React.FC<PayrollFormProps> = ({
     onClose();
   };
 
-  const handleChange = (field: string, value: any) => {
+  const handleChange = (
+    field: keyof typeof formData,
+    value: string | number
+  ) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,33 +26,18 @@ import {
   Target
 } from 'lucide-react';
 
-interface Task {
-  id: string;
-  title: string;
-  description: string;
-  assignedTo: {
-    id: string;
-    name: string;
-    avatar?: string;
-  };
-  assignedBy: {
-    id: string;
-    name: string;
-  };
-  client?: {
-    id: string;
-    name: string;
-  };
-  priority: 'low' | 'medium' | 'high' | 'urgent';
-  status: 'todo' | 'in-progress' | 'review' | 'completed';
-  dueDate: string;
-  createdAt: string;
-  labels: string[];
-}
+// Task interface now sourced from useTasksQuery hook (UITask)
+import { useTasksQuery, UITask } from '@/hooks/useTasksQuery';
+import { useTenant } from '@/contexts/TenantContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { can } from '@/utils/permissions';
+import { fallbackEmployeeName as deriveAssigneeName, fallbackClientName as deriveClientName } from '@/utils/selectors';
 
-const mockTasks: Task[] = [
+// Initial fallback tasks (seed) used if storage empty
+const seedTasks: UITask[] = [
   {
     id: '1',
+  orgId: 'global',
     title: 'Process visa application for Ahmed Hassan',
     description: 'Complete visa documentation and submit to embassy',
     assignedTo: { id: '1', name: 'Sarah Ahmed', avatar: '/api/placeholder/32/32' },
@@ -66,6 +51,7 @@ const mockTasks: Task[] = [
   },
   {
     id: '2',
+  orgId: 'global',
     title: 'Document verification for Maria Santos',
     description: 'Verify passport and supporting documents',
     assignedTo: { id: '2', name: 'Mohammed Khan', avatar: '/api/placeholder/32/32' },
@@ -79,6 +65,7 @@ const mockTasks: Task[] = [
   },
   {
     id: '3',
+  orgId: 'global',
     title: 'Embassy appointment booking',
     description: 'Book embassy appointment for client interview',
     assignedTo: { id: '3', name: 'Fatima Rahman', avatar: '/api/placeholder/32/32' },
@@ -92,6 +79,7 @@ const mockTasks: Task[] = [
   },
   {
     id: '4',
+  orgId: 'global',
     title: 'Follow up on application status',
     description: 'Check status with embassy and update client',
     assignedTo: { id: '1', name: 'Sarah Ahmed', avatar: '/api/placeholder/32/32' },
@@ -105,6 +93,7 @@ const mockTasks: Task[] = [
   },
   {
     id: '5',
+  orgId: 'global',
     title: 'Prepare client meeting presentation',
     description: 'Create presentation for new client onboarding',
     assignedTo: { id: '2', name: 'Mohammed Khan', avatar: '/api/placeholder/32/32' },
@@ -117,6 +106,7 @@ const mockTasks: Task[] = [
   },
   {
     id: '6',
+  orgId: 'global',
     title: 'Update client database',
     description: 'Add new client information and update existing records',
     assignedTo: { id: '4', name: 'Ali Hassan', avatar: '/api/placeholder/32/32' },
@@ -130,20 +120,111 @@ const mockTasks: Task[] = [
 ];
 
 const TasksPage: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const { tasksQuery, addTask, updateTask, deleteTask } = useTasksQuery();
+  const { currentOrgId } = useTenant();
+  const tasks = tasksQuery.data ?? [];
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedTask, setSelectedTask] = useState<UITask | null>(null);
 
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         task.description.toLowerCase().includes(searchTerm.toLowerCase());
+  // Form state
+  const [formTitle, setFormTitle] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formAssignee, setFormAssignee] = useState('');
+  const [formAssigneeName, setFormAssigneeName] = useState('');
+  const [formClient, setFormClient] = useState('');
+  const [formClientName, setFormClientName] = useState('');
+  const [formPriority, setFormPriority] = useState<'low' | 'medium' | 'high' | 'urgent' | ''>('');
+  const [formDueDate, setFormDueDate] = useState('');
+  const [formLabels, setFormLabels] = useState('');
+
+  const resetForm = () => {
+    setFormTitle('');
+    setFormDescription('');
+    setFormAssignee('');
+    setFormAssigneeName('');
+    setFormClient('');
+    setFormClientName('');
+    setFormPriority('');
+    setFormDueDate('');
+    setFormLabels('');
+    setSelectedTask(null);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setIsCreateModalOpen(true);
+  };
+
+  const openEdit = (task: UITask) => {
+    setSelectedTask(task);
+    setFormTitle(task.title);
+    setFormDescription(task.description);
+    setFormAssignee(task.assignedTo.id);
+    setFormAssigneeName(task.assignedTo.name);
+    if (task.client) {
+      setFormClient(task.client.id);
+      setFormClientName(task.client.name);
+    } else {
+      setFormClient('');
+      setFormClientName('');
+    }
+    setFormPriority(task.priority);
+    setFormDueDate(task.dueDate);
+    setFormLabels(task.labels.join(', '));
+    setIsCreateModalOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (!formTitle.trim() || !formAssignee || !formPriority || !formDueDate) {
+      return; // basic validation
+    }
+    const labels = formLabels.split(',').map(l => l.trim()).filter(Boolean);
+    if (selectedTask) {
+      await updateTask(selectedTask.id, {
+        title: formTitle.trim(),
+        description: formDescription.trim(),
+        assignedTo: { id: formAssignee, name: formAssigneeName || deriveAssigneeName(formAssignee), avatar: '/api/placeholder/32/32' },
+        client: formClient ? { id: formClient, name: formClientName || deriveClientName(formClient) } : undefined,
+        priority: formPriority as UITask['priority'],
+        dueDate: formDueDate,
+        labels
+      });
+    } else {
+      await addTask({
+        title: formTitle.trim(),
+        description: formDescription.trim(),
+        assignedTo: { id: formAssignee, name: formAssigneeName || deriveAssigneeName(formAssignee), avatar: '/api/placeholder/32/32' },
+        assignedBy: { id: '2', name: 'Mike Manager' },
+        client: formClient ? { id: formClient, name: formClientName || deriveClientName(formClient) } : undefined,
+        priority: formPriority as UITask['priority'],
+        status: 'todo',
+        dueDate: formDueDate,
+        labels,
+      });
+    }
+    setIsCreateModalOpen(false);
+    resetForm();
+  };
+
+  const handleDelete = async (taskId: string) => {
+    if (!confirm('Delete this task?')) return;
+    await deleteTask(taskId);
+  };
+
+  // Name derivation now via selectors util (imported above)
+
+  const filteredTasks = useMemo(() => tasks.filter(task => {
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = !term || task.title.toLowerCase().includes(term) ||
+      task.description.toLowerCase().includes(term) || task.labels.some(l => l.toLowerCase().includes(term));
     const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
     const matchesAssignee = assigneeFilter === 'all' || task.assignedTo.id === assigneeFilter;
     return matchesSearch && matchesPriority && matchesAssignee;
-  });
+  }), [tasks, searchTerm, priorityFilter, assigneeFilter]);
 
   const tasksByStatus = {
     todo: filteredTasks.filter(task => task.status === 'todo'),
@@ -182,35 +263,30 @@ const TasksPage: React.FC = () => {
     }
   };
 
-  const moveTask = (taskId: string, newStatus: string) => {
-    setTasks(prev => prev.map(task => 
-      task.id === taskId ? { ...task, status: newStatus as Task['status'] } : task
-    ));
+  const moveTask = async (taskId: string, newStatus: string) => {
+    await updateTask(taskId, { status: newStatus as UITask['status'] });
   };
 
   const TaskCreateModal = () => (
-    <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+    <Dialog open={isCreateModalOpen} onOpenChange={(open) => { if (!open) { setIsCreateModalOpen(false); resetForm(); } else setIsCreateModalOpen(true); }}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create New Task</DialogTitle>
-          <DialogDescription>Add a new task to track progress</DialogDescription>
+          <DialogTitle>{selectedTask ? 'Edit Task' : 'Create New Task'}</DialogTitle>
+          <DialogDescription>{selectedTask ? 'Update task details' : 'Add a new task to track progress'}</DialogDescription>
         </DialogHeader>
-        
         <div className="grid grid-cols-1 gap-4">
           <div className="space-y-2">
             <Label htmlFor="title">Task Title</Label>
-            <Input id="title" placeholder="Enter task title..." />
+            <Input id="title" placeholder="Enter task title..." value={formTitle} onChange={(e) => setFormTitle(e.target.value)} />
           </div>
-          
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
-            <Textarea id="description" placeholder="Task description..." rows={3} />
+            <Textarea id="description" placeholder="Task description..." rows={3} value={formDescription} onChange={(e) => setFormDescription(e.target.value)} />
           </div>
-          
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="assignee">Assign To</Label>
-              <Select>
+              <Select value={formAssignee} onValueChange={(v) => { setFormAssignee(v); setFormAssigneeName(deriveAssigneeName(v)); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select assignee" />
                 </SelectTrigger>
@@ -222,10 +298,9 @@ const TasksPage: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
-            
             <div className="space-y-2">
               <Label htmlFor="client">Client (Optional)</Label>
-              <Select>
+              <Select value={formClient} onValueChange={(v) => { setFormClient(v); setFormClientName(deriveClientName(v)); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select client" />
                 </SelectTrigger>
@@ -237,11 +312,10 @@ const TasksPage: React.FC = () => {
               </Select>
             </div>
           </div>
-          
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
-              <Select>
+              <Select value={formPriority} onValueChange={(v) => setFormPriority(v as UITask['priority'])}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select priority" />
                 </SelectTrigger>
@@ -253,78 +327,83 @@ const TasksPage: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
-            
             <div className="space-y-2">
               <Label htmlFor="dueDate">Due Date</Label>
-              <Input type="date" id="dueDate" />
+              <Input type="date" id="dueDate" value={formDueDate} onChange={(e) => setFormDueDate(e.target.value)} />
             </div>
           </div>
-          
           <div className="space-y-2">
             <Label htmlFor="labels">Labels (comma separated)</Label>
-            <Input id="labels" placeholder="e.g. visa, urgent, documents" />
+            <Input id="labels" placeholder="e.g. visa, urgent, documents" value={formLabels} onChange={(e) => setFormLabels(e.target.value)} />
           </div>
         </div>
-        
         <DialogFooter>
-          <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
-          <Button>Create Task</Button>
+          <Button variant="outline" onClick={() => { setIsCreateModalOpen(false); resetForm(); }}>Cancel</Button>
+          <Button onClick={handleSubmit}>{selectedTask ? 'Save Changes' : 'Create Task'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 
-  const TaskCard: React.FC<{ task: Task }> = ({ task }) => (
-    <Card className="mb-3 hover:shadow-md transition-all duration-200 cursor-pointer">
-      <CardContent className="p-4">
-        <div className="space-y-3">
-          <div className="flex items-start justify-between">
-            <h4 className="font-medium text-sm line-clamp-2">{task.title}</h4>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
-              <MoreHorizontal className="w-3 h-3" />
+  const TaskCard: React.FC<{ task: UITask }> = ({ task }) => (
+    <Card className="mb-3 hover:shadow-md transition-all duration-200" key={task.id}>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start justify-between">
+          <h4 className="font-medium text-sm line-clamp-2 cursor-pointer" onClick={() => openEdit(task)}>{task.title}</h4>
+          <div className="flex items-center gap-1">
+            <Select value={task.status} onValueChange={(v) => moveTask(task.id, v)}>
+              <SelectTrigger className="h-6 w-24 text-xs px-2 py-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todo">To Do</SelectItem>
+                <SelectItem value="in-progress">In Progress</SelectItem>
+                <SelectItem value="review">Review</SelectItem>
+                <SelectItem value="completed">Done</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEdit(task)}>
+              <Edit className="w-3 h-3" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => handleDelete(task.id)}>
+              <Trash2 className="w-3 h-3" />
             </Button>
           </div>
-          
-          <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
-          
-          <div className="flex items-center justify-between">
+        </div>
+        <p className="text-xs text-muted-foreground line-clamp-3 min-h-[36px]">{task.description || 'No description'}</p>
+        <div className="flex items-center justify-between">
             <Badge className={getPriorityColor(task.priority)} variant="secondary">
               {getPriorityIcon(task.priority)}
               <span className="ml-1 capitalize text-xs">{task.priority}</span>
             </Badge>
-            
             <Avatar className="h-6 w-6">
               <AvatarImage src={task.assignedTo.avatar} />
               <AvatarFallback className="text-xs">
                 {task.assignedTo.name.split(' ').map(n => n[0]).join('')}
               </AvatarFallback>
             </Avatar>
+        </div>
+        {task.labels.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {task.labels.slice(0, 3).map((label) => (
+              <span key={label} className="bg-accent text-accent-foreground px-2 py-0.5 rounded-full text-[10px]">
+                {label}
+              </span>
+            ))}
+            {task.labels.length > 3 && (
+              <span className="text-[10px] text-muted-foreground">+{task.labels.length - 3}</span>
+            )}
           </div>
-          
-          {task.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {task.labels.slice(0, 2).map((label) => (
-                <span key={label} className="bg-accent text-accent-foreground px-2 py-0.5 rounded-full text-xs">
-                  {label}
-                </span>
-              ))}
-              {task.labels.length > 2 && (
-                <span className="text-xs text-muted-foreground">+{task.labels.length - 2}</span>
-              )}
-            </div>
-          )}
-          
-          {task.client && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <User className="w-3 h-3" />
-              {task.client.name}
-            </div>
-          )}
-          
+        )}
+        {task.client && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Calendar className="w-3 h-3" />
-            Due: {new Date(task.dueDate).toLocaleDateString()}
+            <User className="w-3 h-3" />
+            {task.client.name}
           </div>
+        )}
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Calendar className="w-3 h-3" />
+          Due: {new Date(task.dueDate).toLocaleDateString()}
         </div>
       </CardContent>
     </Card>
@@ -344,7 +423,7 @@ const TasksPage: React.FC = () => {
           <h1 className="text-3xl font-bold text-foreground">Task Management</h1>
           <p className="text-muted-foreground">Organize and track tasks with Kanban board</p>
         </div>
-        <Button onClick={() => setIsCreateModalOpen(true)}>
+  <Button onClick={openCreate}>
           <Plus className="w-4 h-4 mr-2" />
           New Task
         </Button>
@@ -456,11 +535,11 @@ const TasksPage: React.FC = () => {
                   ))}
                 </div>
                 
-                {column.key === 'todo' && (
+        {column.key === 'todo' && (
                   <Button 
                     variant="outline" 
                     className="w-full mt-3 border-dashed" 
-                    onClick={() => setIsCreateModalOpen(true)}
+          onClick={openCreate}
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     Add Task

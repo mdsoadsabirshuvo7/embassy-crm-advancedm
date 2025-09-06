@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,13 +30,58 @@ import {
   Bell,
   Globe
 } from 'lucide-react';
-import ModuleManagement from '../components/settings/ModuleManagement';
-import NotificationCenter from '../components/notifications/NotificationCenter';
-import AuditLogViewer from '../components/audit/AuditLogViewer';
+import { OrgCreationForm } from '@/components/organization/OrgCreationForm';
+import AdvancedRoadmapPanel from '@/components/settings/AdvancedRoadmapPanel';
+import { JoinOrganizationForm } from '@/components/organization/JoinOrganizationForm';
+const ModuleManagement = lazy(() => import('../components/settings/ModuleManagement'));
+const NotificationCenter = lazy(() => import('../components/notifications/NotificationCenter'));
+const AuditLogViewer = lazy(() => import('../components/audit/AuditLogViewer'));
 import { useI18n, type Language } from '../contexts/I18nContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const SettingsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('general');
+  const { user } = useAuth();
+  const params = useParams();
+  const navigate = useNavigate();
+  // Added 'organizations' so SUPER_ADMIN org management tab works; previously missing which broke navigation.
+  const allowedSections = ['general','branding','templates','integrations','modules','notifications','audit','security','organizations','advanced'] as const;
+  type Section = typeof allowedSections[number];
+  const initialTab = (params.section as Section) && allowedSections.includes(params.section as Section)
+    ? params.section as Section
+    : 'general';
+  const [activeTab, setActiveTab] = useState<Section>(initialTab);
+  const [invites, setInvites] = useState<any[]>([]);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const orgId = localStorage.getItem('activeOrgId');
+        if (!orgId) return;
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        const q = query(collection(db, 'orgInvitations'), where('orgId', '==', orgId));
+        const snap = await getDocs(q);
+        if (!active) return;
+        const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        rows.sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+        setInvites(rows);
+      } catch (e) { console.warn('Invite load failed', e); }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  // Keep active tab in sync when the URL parameter changes (e.g., user navigates via address bar/back/forward)
+  React.useEffect(() => {
+    const current = params.section as Section | undefined;
+    if (!current || !allowedSections.includes(current)) {
+      // Redirect invalid sections
+      if (current !== undefined) navigate('/settings/general', { replace: true });
+      return;
+    }
+    if (current !== activeTab) {
+      setActiveTab(current);
+    }
+  }, [params.section]);
   const [logoPreview, setLogoPreview] = useState('/api/placeholder/120/60');
   const { language, setLanguage, t, isRTL } = useI18n();
 
@@ -136,8 +182,12 @@ const SettingsPage: React.FC = () => {
         </Button>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-8">
+      <Tabs value={activeTab} onValueChange={(val) => {
+        if (!allowedSections.includes(val as Section)) return;
+        setActiveTab(val as Section);
+        navigate(`/settings/${val}`);
+      }} className="space-y-6">
+  <TabsList className="grid w-full grid-cols-10">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
@@ -146,7 +196,14 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
+          { (user?.role === 'SUPER_ADMIN') && <TabsTrigger value="organizations">Organizations</TabsTrigger> }
+          <TabsTrigger value="advanced">Advanced</TabsTrigger>
         </TabsList>
+
+        {/* Advanced roadmap content (moved outside TabsList for correct tab behavior) */}
+        <TabsContent value="advanced" className="space-y-6">
+          <AdvancedRoadmapPanel />
+        </TabsContent>
 
         <TabsContent value="general" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -538,15 +595,119 @@ const SettingsPage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="modules" className="space-y-6">
-          <ModuleManagement />
+          <Suspense fallback={<Card className="p-6">Loading module configuration...</Card>}>
+            <ModuleManagement />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-6">
-          <NotificationCenter />
+          <Suspense fallback={<Card className="p-6">Loading notifications...</Card>}>
+            <NotificationCenter />
+          </Suspense>
         </TabsContent>
 
         <TabsContent value="audit" className="space-y-6">
-          <AuditLogViewer />
+          <Suspense fallback={<Card className="p-6">Loading audit logs...</Card>}>
+            <AuditLogViewer />
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="organizations" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card className="border-0 bg-card/80 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building className="w-5 h-5" />
+                  Manage Organizations
+                </CardTitle>
+                <CardDescription>Create or join additional organizations (multi-tenant).</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <React.Suspense fallback={<div>Loading...</div>}>
+                    {/* Lightweight forms */}
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-semibold">Create</h4>
+                      <div>
+                        {/* Lazy inline import to avoid bundling overhead not required now */}
+                        <OrgCreationForm />
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-semibold">Join</h4>
+                      <JoinOrganizationForm />
+                    </div>
+                  </React.Suspense>
+                </div>
+                <div className="pt-4 border-t border-border/40 space-y-2">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold">Pending Invitations</h4>
+                      <button
+                        className="text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                        onClick={async () => {
+                          const email = prompt('Invite email?');
+                          if (!email) return;
+                          const role = prompt('Role (e.g., member)?', 'member') || 'member';
+                          try {
+                            // dynamic import to avoid baseline bundle cost
+                            const { InvitationService } = await import('@/services/invitationService');
+                            const orgId = localStorage.getItem('activeOrgId');
+                            if (!orgId) { alert('No active org'); return; }
+                            const inv = await InvitationService.inviteUser(orgId, email, role);
+                            setInvites(prev => [inv, ...prev]);
+                          } catch (e) {
+                            console.error(e); alert('Failed to send invite');
+                          }
+                        }}
+                      >Invite</button>
+                    </div>
+                    <div className="border rounded-md divide-y">
+                      {invites.length === 0 && <div className="p-3 text-xs text-muted-foreground">No pending invitations</div>}
+                      {invites.map(inv => (
+                        <div key={inv.id} className="p-3 flex items-center justify-between gap-4 text-sm">
+                          <div className="space-y-0.5">
+                            <div className="font-medium">{inv.email}</div>
+                            <div className="text-xs text-muted-foreground flex gap-2 flex-wrap">
+                              <span>{inv.role}</span>
+                              <span>Status: {inv.status}</span>
+                              <span>Token: <code className="bg-muted px-1 rounded">{inv.token}</code></span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {inv.status === 'pending' && (
+                              <button
+                                className="text-xs px-2 py-1 rounded bg-destructive text-destructive-foreground hover:opacity-90"
+                                onClick={async () => {
+                                  try {
+                                    const { InvitationService } = await import('@/services/invitationService');
+                                    await InvitationService.revokeInvitation(inv.id!);
+                                    setInvites(prev => prev.map(i => i.id === inv.id ? { ...i, status: 'revoked' } : i));
+                                  } catch (e) { console.error(e); alert('Failed'); }
+                                }}
+                              >Revoke</button>
+                            )}
+                            {inv.status === 'pending' && (
+                              <button
+                                className="text-xs px-2 py-1 rounded border hover:bg-muted"
+                                onClick={async () => {
+                                  try {
+                                    // For now just copy token to clipboard
+                                    await navigator.clipboard.writeText(inv.token);
+                                    alert('Token copied');
+                                  } catch { alert('Copy failed'); }
+                                }}
+                              >Copy Token</button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="security" className="space-y-6">

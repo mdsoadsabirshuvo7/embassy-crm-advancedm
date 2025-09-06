@@ -63,7 +63,7 @@ export const EmployeeForm: React.FC<EmployeeFormProps> = ({
     onClose();
   };
 
-  const handleChange = (field: string, value: any) => {
+  const handleChange = (field: keyof typeof formData, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
