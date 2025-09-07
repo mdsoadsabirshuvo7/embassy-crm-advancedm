@@ -3,11 +3,15 @@ import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
+import { authOptional, requireAuth } from './middleware/auth.js';
+import { auditMiddleware } from './middleware/audit.js';
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(authOptional(process.env.JWT_SECRET || 'dev-secret'));
+app.use(auditMiddleware(prisma));
 
 // Multi-tenant org header key
 const ORG_HEADER = 'x-org-id';
@@ -56,6 +60,16 @@ app.post('/api/accounts', async (req, res) => {
   }
 });
 
+// Deactivate account
+app.post('/api/accounts/:id/deactivate', requireAuth(), async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const { id } = req.params;
+  const account = await prisma.account.findFirst({ where: { id, orgId } });
+  if (!account) return res.status(404).json({ error: 'Not found' });
+  const updated = await prisma.account.update({ where: { id }, data: { isActive: false } });
+  res.json(updated);
+});
+
 // Invoices
 const invoiceSchema = z.object({
   number: z.string().min(1),
@@ -88,6 +102,18 @@ app.post('/api/invoices', async (req, res) => {
     if (e.code === 'P2002') return res.status(409).json({ error: 'Duplicate number' });
     console.error(e); res.status(500).json({ error: 'Internal error' });
   }
+});
+
+// Update invoice status
+app.post('/api/invoices/:id/status', requireAuth(), async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const { id } = req.params;
+  const status = (req.body?.status || '').toString();
+  if (!['draft','sent','paid','void'].includes(status)) return res.status(422).json({ error: 'Invalid status' });
+  const invoice = await prisma.invoice.findFirst({ where: { id, orgId } });
+  if (!invoice) return res.status(404).json({ error: 'Not found' });
+  const updated = await prisma.invoice.update({ where: { id }, data: { status } });
+  res.json(updated);
 });
 
 // Example: create journal entry (atomic)
