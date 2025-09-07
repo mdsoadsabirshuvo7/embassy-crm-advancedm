@@ -30,6 +30,66 @@ app.get('/api/expenses', async (req, res) => {
   res.json(expenses);
 });
 
+// Accounts
+const accountSchema = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1),
+  type: z.enum(['asset','liability','equity','revenue','expense'])
+});
+
+app.get('/api/accounts', async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const accounts = await prisma.account.findMany({ where: { orgId, isActive: true }, orderBy: { code: 'asc' } });
+  res.json(accounts);
+});
+
+app.post('/api/accounts', async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const parsed = accountSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(422).json(parsed.error.format());
+  try {
+    const account = await prisma.account.create({ data: { id: crypto.randomUUID(), orgId, balance: 0, ...parsed.data } });
+    res.status(201).json(account);
+  } catch (e:any) {
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Duplicate code' });
+    console.error(e); res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// Invoices
+const invoiceSchema = z.object({
+  number: z.string().min(1),
+  subtotal: z.number().nonnegative(),
+  tax: z.number().nonnegative().default(0),
+  total: z.number().nonnegative(),
+  status: z.enum(['draft','sent','paid','void']),
+  issueDate: z.coerce.date(),
+  dueDate: z.coerce.date().optional()
+});
+
+app.get('/api/invoices', async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const invoices = await prisma.invoice.findMany({ where: { orgId }, orderBy: { issueDate: 'desc' }, take: 100 });
+  res.json(invoices);
+});
+
+app.post('/api/invoices', async (req, res) => {
+  const orgId = (req as any).orgId; if (!orgId) return res.status(400).json({ error: 'Missing org header' });
+  const parsed = invoiceSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(422).json(parsed.error.format());
+  const data = parsed.data;
+  if (Math.abs((data.subtotal + data.tax) - data.total) > 0.01) {
+    return res.status(400).json({ error: 'Subtotal + tax must equal total' });
+  }
+  try {
+    const invoice = await prisma.invoice.create({ data: { id: crypto.randomUUID(), orgId, createdBy: null, ...data } });
+    res.status(201).json(invoice);
+  } catch (e:any) {
+    if (e.code === 'P2002') return res.status(409).json({ error: 'Duplicate number' });
+    console.error(e); res.status(500).json({ error: 'Internal error' });
+  }
+});
+
 // Example: create journal entry (atomic)
 const journalSchema = z.object({
   date: z.coerce.date(),
