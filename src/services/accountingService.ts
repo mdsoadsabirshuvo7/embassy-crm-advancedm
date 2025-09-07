@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Account, Transaction, TransactionEntry, Invoice, InvoiceItem } from '../types/database';
+import apiClient from './apiClient';
 
 export class AccountingService {
   // Chart of Accounts Management
@@ -56,6 +57,34 @@ export class AccountingService {
 
   // Double-Entry Transaction Management
   static async createTransaction(transactionData: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>): Promise<Transaction> {
+    // If API backend configured, delegate to REST endpoint (journal create maps to transaction)
+    if (apiClient.isEnabled()) {
+      // Map entries shape to backend expectation (accountCode vs accountId may differ in future)
+      const payload = {
+        date: transactionData.date,
+        ref: transactionData.reference || `TX-${Date.now()}`,
+        memo: transactionData.description,
+        lines: transactionData.entries.map(e => ({
+          accountCode: e.accountId, // Using accountId as placeholder code
+          debit: e.debit,
+          credit: e.credit
+        }))
+      };
+      try {
+        const resp = await apiClient.post<{ journal: { id: string; ref: string; date: string; memo?: string } }>(`/api/accounting/journal`, payload, transactionData.orgId);
+        // Return a minimal Transaction object (frontend consumers can reconcile later)
+        return {
+          ...transactionData,
+            id: resp.journal.id,
+            reference: resp.journal.ref,
+            createdAt: new Date(),
+            updatedAt: new Date()
+        } as Transaction;
+      } catch (e) {
+        console.error('API transaction create failed, falling back to local logic?', e);
+        // Continue to local logic fallback
+      }
+    }
     // Validate double-entry (debits = credits)
     const totalDebits = transactionData.entries.reduce((sum, entry) => sum + entry.debit, 0);
     const totalCredits = transactionData.entries.reduce((sum, entry) => sum + entry.credit, 0);
@@ -64,7 +93,7 @@ export class AccountingService {
       throw new Error('Transaction is not balanced: debits must equal credits');
     }
 
-    const batch = writeBatch(db);
+  const batch = writeBatch(db);
     
     // Create transaction
     const transactionRef = doc(collection(db, 'transactions'));
@@ -95,8 +124,8 @@ export class AccountingService {
       });
     }
     
-    await batch.commit();
-    return transaction;
+  await batch.commit();
+  return transaction;
   }
 
   private static calculateBalanceChange(accountType: string, debit: number, credit: number): number {

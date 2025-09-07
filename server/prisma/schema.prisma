@@ -1,0 +1,99 @@
+// Prisma schema for Embassy CRM backend (initial minimal slice)
+// Run: npx prisma generate && npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     UserOrgRole[]
+  expenses  Expense[]
+  journals  LedgerJournal[]
+  featureFlags FeatureFlag[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  displayName String?
+  createdAt DateTime @default(now())
+  roles     UserOrgRole[]
+  auditLogs AuditLog[]
+}
+
+model UserOrgRole {
+  userId String
+  orgId  String
+  role   String
+  user   User        @relation(fields: [userId], references: [id])
+  org    Organization @relation(fields: [orgId], references: [id])
+  @@id([userId, orgId])
+  @@index([orgId])
+}
+
+model FeatureFlag {
+  id        Int      @id @default(autoincrement())
+  orgId     String
+  key       String
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+  org       Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, key])
+  @@index([orgId])
+}
+
+model Expense {
+  id        String   @id @default(uuid())
+  orgId     String
+  amount    Decimal  @db.Decimal(18,2)
+  currency  String   @default("USD")
+  memo      String?
+  createdAt DateTime @default(now())
+  org       Organization @relation(fields: [orgId], references: [id])
+  @@index([orgId, createdAt])
+}
+
+model LedgerJournal {
+  id        String   @id
+  orgId     String
+  date      DateTime
+  ref       String
+  memo      String?
+  lines     LedgerLine[]
+  createdAt DateTime @default(now())
+  org       Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, ref])
+  @@index([orgId, date])
+}
+
+model LedgerLine {
+  id         Int       @id @default(autoincrement())
+  journalId  String
+  accountCode String
+  debit      Decimal   @db.Decimal(18,2) @default(0)
+  credit     Decimal   @db.Decimal(18,2) @default(0)
+  journal    LedgerJournal @relation(fields: [journalId], references: [id])
+  @@index([journalId])
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  orgId     String
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  oldData   Json?
+  newData   Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+  @@index([orgId, createdAt])
+}
